@@ -1,0 +1,194 @@
+/* J.A.R.V.I.S. Advanced Animations and Effects */
+
+/* Glowing pulse animation for critical alerts */
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(102, 200, 255, 0.3), inset 0 0 5px rgba(102, 200, 255, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(102, 200, 255, 0.6), inset 0 0 10px rgba(102, 200, 255, 0.2);
+  }
+}
+
+/* Scan line animation */
+@keyframes scan-line {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
+/* Rotating border animation */
+@keyframes rotate-border {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Floating animation */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* Data stream flowing animation */
+@keyframes data-stream-flow {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  5% {
+    opacity: 1;
+  }
+  95% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
+/* Blinking cursor */
+@keyframes blink {
+  0%, 49% {
+    opacity: 1;
+  }
+  50%, 100% {
+    opacity: 0;
+  }
+}
+
+/* Shimmer effect */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+/* Neon glow effect */
+@keyframes neon-glow {
+  0%, 100% {
+    text-shadow: 0 0 10px rgba(102, 200, 255, 0.5), 0 0 20px rgba(102, 200, 255, 0.3);
+  }
+  50% {
+    text-shadow: 0 0 20px rgba(102, 200, 255, 0.8), 0 0 30px rgba(102, 200, 255, 0.5);
+  }
+}
+
+/* Utility classes */
+.animate-glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+.animate-scan-line {
+  animation: scan-line 3s ease-in-out infinite;
+}
+
+.animate-rotate-border {
+  animation: rotate-border 20s linear infinite;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-data-stream {
+  animation: data-stream-flow 3s ease-in-out infinite;
+}
+
+.animate-blink {
+  animation: blink 1s step-end infinite;
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+  background: linear-gradient(90deg, transparent, rgba(102, 200, 255, 0.2), transparent);
+  background-size: 1000px 100%;
+}
+
+.animate-neon-glow {
+  animation: neon-glow 2s ease-in-out infinite;
+}
+
+/* Hover effects */
+.hover-lift {
+  transition: all 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 30px rgba(102, 200, 255, 0.2);
+}
+
+/* Button ripple effect */
+.ripple {
+  position: relative;
+  overflow: hidden;
+}
+
+.ripple::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(102, 200, 255, 0.3);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.ripple:active::after {
+  animation: ripple-animation 0.6s ease-out;
+}
+
+@keyframes ripple-animation {
+  0% {
+    width: 0;
+    height: 0;
+    opacity: 1;
+  }
+  100% {
+    width: 300px;
+    height: 300px;
+    opacity: 0;
+  }
+}
+
+/* Smooth transitions */
+.transition-smooth {
+  transition: all 300ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
