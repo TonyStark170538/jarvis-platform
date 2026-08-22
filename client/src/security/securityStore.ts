@@ -1,9 +1,11 @@
+import { createSecurityIncidentThreads } from '@/lib/incidentCorrelation';
 import { generateScenario, getAttackScenario } from './eventGenerator';
 import { evaluateEvent } from './detectionEngine';
 import type {
   DetectionResult,
   ScenarioRun,
   SecurityEvent,
+  SecurityIncidentThread,
   SecurityStoreListener,
   SecurityStoreSnapshot,
 } from './types';
@@ -11,6 +13,7 @@ import type {
 const MAX_EVENTS = 500;
 const MAX_DETECTIONS = 250;
 const MAX_RUNS = 50;
+const MAX_INCIDENT_THREADS = 100;
 
 function createId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -23,13 +26,14 @@ function isAbortError(error: unknown): boolean {
 /**
  * In-memory event bus for the J.A.R.V.I.S. security simulation.
  *
- * React components can subscribe to this store without introducing another
- * state-management dependency. A backend/WebSocket adapter can later feed
- * the same ingestEvent() API without changing the UI contract.
+ * Every event follows the same pipeline:
+ * telemetry -> detection rules -> correlation -> incident threads -> UI.
+ * A backend/WebSocket adapter can later feed the same ingestEvent() API.
  */
 export class SecurityStore {
   private events: SecurityEvent[] = [];
   private detections: DetectionResult[] = [];
+  private incidentThreads: SecurityIncidentThread[] = [];
   private runs: ScenarioRun[] = [];
   private listeners = new Set<SecurityStoreListener>();
   private activeController: AbortController | null = null;
@@ -39,6 +43,7 @@ export class SecurityStore {
     return {
       events: [...this.events],
       detections: [...this.detections],
+      incidentThreads: [...this.incidentThreads],
       runs: [...this.runs],
       isSimulationRunning: this.simulationRunning,
     };
@@ -63,12 +68,11 @@ export class SecurityStore {
 
     for (const detection of newDetections) {
       const key = `${detection.ruleId}:${detection.eventId}`;
-      if (!existingKeys.has(key)) {
-        this.detections.unshift(detection);
-      }
+      if (!existingKeys.has(key)) this.detections.unshift(detection);
     }
 
     this.detections = this.detections.slice(0, MAX_DETECTIONS);
+    this.rebuildIncidentThreads();
     this.emit();
 
     return newDetections;
@@ -76,9 +80,7 @@ export class SecurityStore {
 
   ingestEvents(events: SecurityEvent[]): DetectionResult[] {
     const detections: DetectionResult[] = [];
-    for (const event of events) {
-      detections.push(...this.ingestEvent(event));
-    }
+    for (const event of events) detections.push(...this.ingestEvent(event));
     return detections;
   }
 
@@ -119,9 +121,7 @@ export class SecurityStore {
       this.replaceRun(run);
       return { ...run, eventIds: [...run.eventIds] };
     } catch (error) {
-      if (!isAbortError(error)) {
-        throw error;
-      }
+      if (!isAbortError(error)) throw error;
 
       run.completedAt = new Date().toISOString();
       this.replaceRun(run);
@@ -142,6 +142,7 @@ export class SecurityStore {
   clearEvents(): void {
     this.events = [];
     this.detections = [];
+    this.incidentThreads = [];
     this.emit();
   }
 
@@ -154,8 +155,16 @@ export class SecurityStore {
     this.stopSimulation();
     this.events = [];
     this.detections = [];
+    this.incidentThreads = [];
     this.runs = [];
     this.emit();
+  }
+
+  private rebuildIncidentThreads(): void {
+    this.incidentThreads = createSecurityIncidentThreads(this.events).slice(
+      0,
+      MAX_INCIDENT_THREADS
+    );
   }
 
   private replaceRun(run: ScenarioRun): void {
