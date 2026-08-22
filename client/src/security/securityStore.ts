@@ -16,6 +16,10 @@ function createId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 /**
  * In-memory event bus for the J.A.R.V.I.S. security simulation.
  *
@@ -115,7 +119,7 @@ export class SecurityStore {
       this.replaceRun(run);
       return { ...run, eventIds: [...run.eventIds] };
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+      if (!isAbortError(error)) {
         throw error;
       }
 
