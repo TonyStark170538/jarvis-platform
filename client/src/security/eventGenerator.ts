@@ -151,14 +151,18 @@ export async function generateScenario({
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
-      reject(new DOMException('Simulation aborted', 'AbortError'));
+      const error = new Error('Simulation aborted');
+      error.name = 'AbortError';
+      reject(error);
       return;
     }
 
-    const timer = window.setTimeout(resolve, ms);
+    const timer = globalThis.setTimeout(resolve, ms);
     const abortHandler = () => {
-      window.clearTimeout(timer);
-      reject(new DOMException('Simulation aborted', 'AbortError'));
+      globalThis.clearTimeout(timer);
+      const error = new Error('Simulation aborted');
+      error.name = 'AbortError';
+      reject(error);
     };
 
     signal?.addEventListener('abort', abortHandler, { once: true });
