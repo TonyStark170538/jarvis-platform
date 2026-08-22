@@ -1,6 +1,7 @@
 import { createSecurityIncidentThreads } from '@/lib/incidentCorrelation';
 import { generateScenario, getAttackScenario } from './eventGenerator';
 import { evaluateEvent } from './detectionEngine';
+import { securityApi } from './api';
 import type {
   DetectionResult,
   ScenarioRun,
@@ -24,11 +25,10 @@ function isAbortError(error: unknown): boolean {
 }
 
 /**
- * In-memory event bus for the J.A.R.V.I.S. security simulation.
+ * Browser-side security event bus.
  *
- * Every event follows the same pipeline:
- * telemetry -> detection rules -> correlation -> incident threads -> UI.
- * A backend/WebSocket adapter can later feed the same ingestEvent() API.
+ * Local simulation remains available for the Attack Lab, while every ingested
+ * event is also sent to the separate Render API when the request succeeds.
  */
 export class SecurityStore {
   private events: SecurityEvent[] = [];
@@ -38,6 +38,7 @@ export class SecurityStore {
   private listeners = new Set<SecurityStoreListener>();
   private activeController: AbortController | null = null;
   private simulationRunning = false;
+  private backendOnline = false;
 
   getSnapshot(): SecurityStoreSnapshot {
     return {
@@ -46,6 +47,7 @@ export class SecurityStore {
       incidentThreads: [...this.incidentThreads],
       runs: [...this.runs],
       isSimulationRunning: this.simulationRunning,
+      backendOnline: this.backendOnline,
     };
   }
 
@@ -53,6 +55,33 @@ export class SecurityStore {
     this.listeners.add(listener);
     listener(this.getSnapshot());
     return () => this.listeners.delete(listener);
+  }
+
+  async connectBackend(): Promise<boolean> {
+    try {
+      await securityApi.health();
+      this.backendOnline = true;
+      await this.hydrateFromBackend();
+      this.emit();
+      return true;
+    } catch {
+      this.backendOnline = false;
+      this.emit();
+      return false;
+    }
+  }
+
+  async hydrateFromBackend(): Promise<void> {
+    try {
+      const snapshot = await securityApi.snapshot();
+      this.events = snapshot.events.slice(0, MAX_EVENTS);
+      this.rebuildLocalAnalysis();
+      this.backendOnline = true;
+      this.emit();
+    } catch {
+      this.backendOnline = false;
+      this.emit();
+    }
   }
 
   ingestEvent(event: SecurityEvent): DetectionResult[] {
@@ -74,6 +103,19 @@ export class SecurityStore {
     this.detections = this.detections.slice(0, MAX_DETECTIONS);
     this.rebuildIncidentThreads();
     this.emit();
+
+    // The local UI stays responsive even if the backend is unavailable.
+    // The API becomes the shared source of truth once Render is configured.
+    void securityApi
+      .ingestEvent(event)
+      .then(() => {
+        this.backendOnline = true;
+        this.emit();
+      })
+      .catch(() => {
+        this.backendOnline = false;
+        this.emit();
+      });
 
     return newDetections;
   }
@@ -158,6 +200,22 @@ export class SecurityStore {
     this.incidentThreads = [];
     this.runs = [];
     this.emit();
+  }
+
+  private rebuildLocalAnalysis(): void {
+    this.detections = [];
+    for (const event of [...this.events].reverse()) {
+      const detections = evaluateEvent(event, this.events);
+      const existingKeys = new Set(
+        this.detections.map((detection) => `${detection.ruleId}:${detection.eventId}`)
+      );
+      for (const detection of detections) {
+        const key = `${detection.ruleId}:${detection.eventId}`;
+        if (!existingKeys.has(key)) this.detections.push(detection);
+      }
+    }
+    this.detections = this.detections.slice(0, MAX_DETECTIONS);
+    this.rebuildIncidentThreads();
   }
 
   private rebuildIncidentThreads(): void {
