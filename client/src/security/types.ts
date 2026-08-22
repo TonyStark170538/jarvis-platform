@@ -1,8 +1,7 @@
 /**
  * J.A.R.V.I.S. Security Core Types
- *
- * Shared domain model for simulated telemetry, detections, incidents, and
- * future integrations with Suricata / Zeek / Splunk.
+ * Shared domain model for simulated telemetry, detections, incidents,
+ * and future integrations with Suricata / Zeek / SIEM providers.
  */
 
 export type SecuritySeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
@@ -39,25 +38,17 @@ export interface SecurityEvent {
   title: string;
   description: string;
   severity: SecuritySeverity;
-
   sourceIP?: string;
   destinationIP?: string;
   sourcePort?: number;
   destinationPort?: number;
   protocol?: string;
-
   hostname?: string;
   username?: string;
   processName?: string;
   filePath?: string;
-
-  /** MITRE ATT&CK technique IDs associated with the event. */
   mitreTechniques?: string[];
-
-  /** Simulation/scenario that produced this event, when applicable. */
   scenarioId?: string;
-
-  /** Arbitrary provider-specific metadata. */
   metadata?: Record<string, unknown>;
 }
 
@@ -67,7 +58,6 @@ export interface DetectionRule {
   description: string;
   severity: SecuritySeverity;
   mitreTechniques: string[];
-  /** Return true when an event satisfies the rule. */
   match: (event: SecurityEvent) => boolean;
 }
 
@@ -108,9 +98,24 @@ export interface ScenarioRun {
   eventIds: string[];
 }
 
+export interface SecurityIncidentThread {
+  id: string;
+  rootEventId: string;
+  events: string[];
+  pattern: string;
+  severity: SecuritySeverity;
+  attackTechniques: string[];
+  relatedIncidents: string[];
+  correlationStrength: number;
+  correlationReasons: string[];
+  firstSeen: string;
+  lastSeen: string;
+}
+
 export interface SecurityStoreSnapshot {
   events: SecurityEvent[];
   detections: DetectionResult[];
+  incidentThreads: SecurityIncidentThread[];
   runs: ScenarioRun[];
   isSimulationRunning: boolean;
 }
