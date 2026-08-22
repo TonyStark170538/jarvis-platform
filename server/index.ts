@@ -1,33 +1,23 @@
+import cors from "cors";
 import express from "express";
 import { createServer } from "http";
-import path from "path";
-import { fileURLToPath } from "url";
+import securityRouter from "./security/routes";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const app = express();
+const server = createServer(app);
 
-async function startServer() {
-  const app = express();
-  const server = createServer(app);
+app.disable("x-powered-by");
+app.use(cors({ origin: process.env.FRONTEND_ORIGIN?.split(",") ?? true }));
+app.use(express.json({ limit: "256kb" }));
 
-  // Serve static files from dist/public in production
-  const staticPath =
-    process.env.NODE_ENV === "production"
-      ? path.resolve(__dirname, "public")
-      : path.resolve(__dirname, "..", "dist", "public");
+app.get("/api/health", (_req, res) => {
+  res.json({ success: true, service: "jarvis-api", status: "online" });
+});
 
-  app.use(express.static(staticPath));
+app.use("/api/security", securityRouter);
 
-  // Handle client-side routing - serve index.html for all routes
-  app.get("*", (_req, res) => {
-    res.sendFile(path.join(staticPath, "index.html"));
-  });
+const port = Number(process.env.PORT ?? 3001);
 
-  const port = process.env.PORT || 3000;
-
-  server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
-  });
-}
-
-startServer().catch(console.error);
+server.listen(port, "0.0.0.0", () => {
+  console.log(`J.A.R.V.I.S. API running on port ${port}`);
+});
