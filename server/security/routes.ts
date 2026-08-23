@@ -1,7 +1,16 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
-import { addEvent, getDevices, getDetections, getEvents, getIncidents, getSnapshot } from './store';
+import { evaluateEvent } from './detectionEngine';
+import {
+  addDetection,
+  addEvent,
+  getDevices,
+  getDetections,
+  getEvents,
+  getIncidents,
+  getSnapshot,
+} from './store';
 import type { SecurityEvent } from './types';
 
 const router = Router();
@@ -58,15 +67,17 @@ router.post('/events', (req, res) => {
   }
 
   const event = parsed.data as SecurityEvent;
+  const history = getEvents(1000);
   addEvent(event);
 
-  // Detection rules will be connected here next. Keeping ingestion separate
-  // lets real endpoint/IDS telemetry use the same API as Attack Lab simulations.
+  const detections = evaluateEvent(event, history);
+  detections.forEach(addDetection);
+
   return res.status(201).json({
     success: true,
     data: {
       event,
-      detections: getDetections(),
+      detections,
       ingestionId: nanoid(),
     },
   });
