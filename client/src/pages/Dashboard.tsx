@@ -1,31 +1,27 @@
-import { useState } from 'react';
-import { AlertCircle, Zap, Wifi, Shield, Activity, TrendingUp } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertCircle, Zap, Wifi, Shield, Activity, TrendingUp, Radio } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-
-/**
- * J.A.R.V.I.S. Dashboard
- * Main command center displaying system status, active alerts, and threat intelligence
- * Design: Dark holographic interface with neon cyan accents and glassmorphism effects
- */
+import { securityStore } from '@/security/securityStore';
+import type { SecuritySeverity, SecurityStoreSnapshot } from '@/security/types';
 
 export default function Dashboard() {
-  const [activeAlerts] = useState([
-    { id: 1, severity: 'critical', message: 'Unauthorized SSH Access Attempt', time: '2 min ago' },
-    { id: 2, severity: 'high', message: 'Suspicious PowerShell Execution', time: '5 min ago' },
-    { id: 3, severity: 'medium', message: 'Unusual Network Traffic Pattern', time: '12 min ago' },
-  ]);
+  const [snapshot, setSnapshot] = useState<SecurityStoreSnapshot>(securityStore.getSnapshot());
 
-  const [systemMetrics] = useState({
-    cpu: 42,
-    memory: 68,
-    networkHealth: 95,
-    detectionStatus: 'Active',
-    activeIncidents: 3,
-  });
+  useEffect(() => securityStore.subscribe(setSnapshot), []);
 
-  const getSeverityColor = (severity: string) => {
+  const activeDetections = snapshot.detections.filter((detection) => detection.severity !== 'low');
+  const criticalCount = snapshot.detections.filter((detection) => detection.severity === 'critical').length;
+  const highCount = snapshot.detections.filter((detection) => detection.severity === 'high').length;
+  const riskScore = useMemo(() => {
+    if (snapshot.events.length === 0) return 0;
+    const weights: Record<SecuritySeverity, number> = { low: 1, medium: 3, high: 6, critical: 10 };
+    const weighted = snapshot.events.reduce((sum, event) => sum + weights[event.severity], 0);
+    return Math.min(10, Number((weighted / Math.max(snapshot.events.length, 1)).toFixed(1)));
+  }, [snapshot.events]);
+
+  const getSeverityColor = (severity: SecuritySeverity) => {
     switch (severity) {
       case 'critical': return 'bg-red-500/20 text-red-300 border-red-500/30';
       case 'high': return 'bg-orange-500/20 text-orange-300 border-orange-500/30';
@@ -37,9 +33,7 @@ export default function Dashboard() {
   return (
     <div className="flex h-screen bg-background text-foreground">
       <Sidebar />
-      
       <main className="flex-1 overflow-auto">
-        {/* Top Status Bar */}
         <div className="glass border-b sticky top-0 z-40">
           <div className="max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between">
@@ -48,62 +42,34 @@ export default function Dashboard() {
                 <p className="text-sm text-muted-foreground">Joint Attack & Response Virtual Intelligence System</p>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
-                <span className="text-sm font-mono">SYSTEM ONLINE</span>
+                <div className={`w-3 h-3 rounded-full ${snapshot.isSimulationRunning ? 'bg-yellow-500' : 'bg-green-500'} animate-pulse`} />
+                <span className="text-sm font-mono">{snapshot.isSimulationRunning ? 'SIMULATION ACTIVE' : 'SYSTEM ONLINE'}</span>
               </div>
             </div>
           </div>
         </div>
 
         <div className="max-w-7xl mx-auto px-6 py-8">
-          {/* System Metrics Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-            <MetricCard 
-              label="CPU Usage" 
-              value={`${systemMetrics.cpu}%`} 
-              icon={<Zap className="w-5 h-5" />}
-              color="cyan"
-            />
-            <MetricCard 
-              label="Memory" 
-              value={`${systemMetrics.memory}%`} 
-              icon={<Activity className="w-5 h-5" />}
-              color="blue"
-            />
-            <MetricCard 
-              label="Network Health" 
-              value={`${systemMetrics.networkHealth}%`} 
-              icon={<Wifi className="w-5 h-5" />}
-              color="green"
-            />
-            <MetricCard 
-              label="Detection Status" 
-              value={systemMetrics.detectionStatus} 
-              icon={<Shield className="w-5 h-5" />}
-              color="cyan"
-            />
-            <MetricCard 
-              label="Active Incidents" 
-              value={systemMetrics.activeIncidents} 
-              icon={<AlertCircle className="w-5 h-5" />}
-              color="red"
-            />
+            <MetricCard label="Security Events" value={snapshot.events.length} icon={<Zap className="w-5 h-5" />} color="cyan" />
+            <MetricCard label="Detections" value={snapshot.detections.length} icon={<Activity className="w-5 h-5" />} color="blue" />
+            <MetricCard label="High Risk" value={activeDetections.length} icon={<Wifi className="w-5 h-5" />} color="green" />
+            <MetricCard label="Detection Status" value="Active" icon={<Shield className="w-5 h-5" />} color="cyan" />
+            <MetricCard label="Critical" value={criticalCount} icon={<AlertCircle className="w-5 h-5" />} color="red" />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Left Panel - Alerts */}
             <div className="lg:col-span-1">
               <Card className="glass glow-border">
                 <div className="p-6">
-                  <h2 className="text-lg font-mono font-bold mb-4 text-accent">ACTIVE ALERTS</h2>
+                  <h2 className="text-lg font-mono font-bold mb-4 text-accent">ACTIVE DETECTIONS</h2>
                   <div className="space-y-3">
-                    {activeAlerts.map((alert) => (
-                      <div 
-                        key={alert.id}
-                        className={`p-3 rounded border ${getSeverityColor(alert.severity)} transition-all hover:shadow-lg`}
-                      >
-                        <p className="text-sm font-medium">{alert.message}</p>
-                        <p className="text-xs mt-1 opacity-70">{alert.time}</p>
+                    {activeDetections.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No detections. Launch an Attack Lab scenario to generate telemetry.</p>
+                    ) : activeDetections.slice(0, 5).map((detection) => (
+                      <div key={detection.id} className={`p-3 rounded border ${getSeverityColor(detection.severity)}`}>
+                        <p className="text-sm font-medium">{detection.title}</p>
+                        <p className="text-xs mt-1 opacity-70">Confidence {detection.confidence}%</p>
                       </div>
                     ))}
                   </div>
@@ -111,72 +77,60 @@ export default function Dashboard() {
               </Card>
             </div>
 
-            {/* Center Panel - Main Visualization */}
             <div className="lg:col-span-1">
               <Card className="glass glow-border h-full">
                 <div className="p-6 flex flex-col items-center justify-center h-full">
                   <div className="relative w-48 h-48 mb-6">
-                    {/* Animated globe placeholder */}
-                    <div className="absolute inset-0 rounded-full border-2 border-accent/30 animate-spin" style={{ animationDuration: '20s' }}></div>
-                    <div className="absolute inset-4 rounded-full border border-accent/50"></div>
+                    <div className="absolute inset-0 rounded-full border-2 border-accent/30 animate-spin" style={{ animationDuration: '20s' }} />
+                    <div className="absolute inset-4 rounded-full border border-accent/50" />
                     <div className="absolute inset-0 flex items-center justify-center">
                       <div className="text-center">
                         <TrendingUp className="w-8 h-8 mx-auto text-accent mb-2" />
                         <p className="text-xs font-mono text-muted-foreground">THREAT MAP</p>
+                        <p className="text-2xl font-mono font-bold text-accent mt-2">{snapshot.events.length}</p>
+                        <p className="text-[10px] text-muted-foreground">EVENTS OBSERVED</p>
                       </div>
                     </div>
                   </div>
-                  <p className="text-xs text-muted-foreground text-center">Real-time threat intelligence and attack origins</p>
+                  <p className="text-xs text-muted-foreground text-center">Security telemetry and detection activity</p>
                 </div>
               </Card>
             </div>
 
-            {/* Right Panel - Risk & Trends */}
             <div className="lg:col-span-1">
               <Card className="glass glow-border">
                 <div className="p-6">
                   <h2 className="text-lg font-mono font-bold mb-4 text-accent">RISK ASSESSMENT</h2>
-                  <div className="space-y-4">
-                    <div>
-                      <p className="text-sm text-muted-foreground mb-2">Overall Risk Score</p>
-                      <div className="text-3xl font-mono font-bold text-orange-400">7.2/10</div>
-                      <div className="w-full bg-card/50 rounded h-2 mt-2 overflow-hidden">
-                        <div className="bg-gradient-to-r from-yellow-500 to-orange-500 h-full" style={{ width: '72%' }}></div>
-                      </div>
-                    </div>
-                    <div className="pt-4 border-t border-border/20">
-                      <p className="text-sm text-muted-foreground mb-3">Top Threats</p>
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span>Brute Force</span>
-                          <Badge variant="outline" className="bg-red-500/10 text-red-300">High</Badge>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span>Data Exfiltration</span>
-                          <Badge variant="outline" className="bg-orange-500/10 text-orange-300">Medium</Badge>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span>Privilege Escalation</span>
-                          <Badge variant="outline" className="bg-yellow-500/10 text-yellow-300">Medium</Badge>
-                        </div>
-                      </div>
-                    </div>
+                  <p className="text-sm text-muted-foreground mb-2">Current telemetry risk</p>
+                  <div className="text-3xl font-mono font-bold text-orange-400">{riskScore.toFixed(1)}/10</div>
+                  <div className="w-full bg-card/50 rounded h-2 mt-2 overflow-hidden">
+                    <div className="bg-gradient-to-r from-yellow-500 to-orange-500 h-full transition-all" style={{ width: `${riskScore * 10}%` }} />
+                  </div>
+                  <div className="pt-4 mt-4 border-t border-border/20 space-y-2">
+                    <div className="flex justify-between text-sm"><span>Critical</span><Badge className="bg-red-500/10 text-red-300">{criticalCount}</Badge></div>
+                    <div className="flex justify-between text-sm"><span>High</span><Badge className="bg-orange-500/10 text-orange-300">{highCount}</Badge></div>
+                    <div className="flex justify-between text-sm"><span>Events</span><Badge className="bg-cyan-500/10 text-cyan-300">{snapshot.events.length}</Badge></div>
                   </div>
                 </div>
               </Card>
             </div>
           </div>
 
-          {/* Detection Feed */}
           <div className="mt-8">
             <Card className="glass glow-border">
               <div className="p-6">
-                <h2 className="text-lg font-mono font-bold mb-4 text-accent">DETECTION FEED</h2>
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {[...Array(5)].map((_, i) => (
-                    <div key={i} className="p-3 bg-card/30 rounded border border-border/20 text-sm font-mono text-xs">
-                      <span className="text-accent">[{new Date().toLocaleTimeString()}]</span>
-                      <span className="ml-2 text-muted-foreground">Process creation detected: svchost.exe</span>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-mono font-bold text-accent">DETECTION FEED</h2>
+                  <Badge className="bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 gap-2"><Radio className="w-3 h-3" />LIVE</Badge>
+                </div>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {snapshot.detections.length === 0 ? (
+                    <div className="p-4 bg-card/30 rounded border border-border/20 text-sm font-mono text-muted-foreground">Awaiting security telemetry...</div>
+                  ) : snapshot.detections.slice(0, 10).map((detection) => (
+                    <div key={detection.id} className="p-3 bg-card/30 rounded border border-border/20 text-sm font-mono">
+                      <span className="text-accent">[{new Date(detection.timestamp).toLocaleTimeString()}]</span>
+                      <span className="ml-2">{detection.title}</span>
+                      <span className="ml-2 text-muted-foreground">— {detection.description}</span>
                     </div>
                   ))}
                 </div>

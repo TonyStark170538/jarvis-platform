@@ -1,21 +1,17 @@
-import { useState } from 'react';
-import { AlertTriangle, Clock, User, FileText } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Clock, User, FileText, Radio, GitBranch } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
 import IncidentDetailModal from '@/components/IncidentDetailModal';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-
-/**
- * J.A.R.V.I.S. Incidents
- * Incident management, investigation, and response tracking
- * Design: Dark holographic interface with severity-based color coding
- */
+import { securityStore } from '@/security/securityStore';
+import type { SecuritySeverity, SecurityStoreSnapshot } from '@/security/types';
 
 interface Incident {
   id: number;
   title: string;
-  severity: 'critical' | 'high' | 'medium' | 'low';
+  severity: SecuritySeverity;
   status: 'open' | 'investigating' | 'resolved';
   created: string;
   assignee: string;
@@ -23,61 +19,54 @@ interface Incident {
   evidence: number;
 }
 
+const severityRank: Record<SecuritySeverity, number> = {
+  info: 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+  critical: 4,
+};
+
 export default function Incidents() {
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
-  const [incidents] = useState<Incident[]>([
-    {
-      id: 1,
-      title: 'Unauthorized SSH Access Attempt',
-      severity: 'critical',
-      status: 'investigating',
-      created: '2 hours ago',
-      assignee: 'Security Team',
-      description: 'Multiple failed SSH login attempts from external IP detected on production server',
-      evidence: 5,
-    },
-    {
-      id: 2,
-      title: 'Suspicious PowerShell Execution',
-      severity: 'high',
-      status: 'investigating',
-      created: '4 hours ago',
-      assignee: 'Incident Response',
-      description: 'Encoded PowerShell script executed with admin privileges',
-      evidence: 8,
-    },
-    {
-      id: 3,
-      title: 'Data Exfiltration Attempt',
-      severity: 'high',
-      status: 'open',
-      created: '6 hours ago',
-      assignee: 'Unassigned',
-      description: 'Large volume of data transferred to external IP address',
-      evidence: 12,
-    },
-    {
-      id: 4,
-      title: 'Malware Detected',
-      severity: 'critical',
-      status: 'resolved',
-      created: '1 day ago',
-      assignee: 'Security Team',
-      description: 'Known malware signature identified in system memory',
-      evidence: 15,
-    },
-  ]);
+  const [snapshot, setSnapshot] = useState<SecurityStoreSnapshot>(securityStore.getSnapshot());
 
-  const getSeverityColor = (severity: string) => {
+  useEffect(() => securityStore.subscribe(setSnapshot), []);
+
+  const incidents = useMemo<Incident[]>(() => {
+    return snapshot.incidentThreads.map((thread, index) => {
+      const rootEvent = snapshot.events.find((event) => event.id === thread.rootEventId);
+      const status =
+        thread.severity === 'critical' || thread.severity === 'high'
+          ? 'investigating'
+          : 'open';
+
+      return {
+        id: index + 1,
+        title: thread.pattern,
+        severity: thread.severity,
+        status,
+        created: new Date(thread.lastSeen).toLocaleString(),
+        assignee: 'Security Team',
+        description:
+          rootEvent?.description ??
+          `${thread.events.length} correlated security events detected.`,
+        evidence: thread.events.length,
+      };
+    });
+  }, [snapshot.incidentThreads, snapshot.events]);
+
+  const getSeverityColor = (severity: SecuritySeverity) => {
     switch (severity) {
       case 'critical': return 'bg-red-500/20 text-red-300 border-red-500/30';
       case 'high': return 'bg-orange-500/20 text-orange-300 border-orange-500/30';
       case 'medium': return 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30';
-      default: return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
+      case 'low': return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
+      default: return 'bg-gray-500/20 text-gray-300 border-gray-500/30';
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: Incident['status']) => {
     switch (status) {
       case 'open': return 'bg-red-500/20 text-red-300 border-red-500/30';
       case 'investigating': return 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30';
@@ -89,22 +78,23 @@ export default function Incidents() {
   return (
     <div className="flex h-screen bg-background text-foreground">
       <Sidebar />
-      
       <main className="flex-1 overflow-auto">
-        {/* Header */}
         <div className="glass border-b sticky top-0 z-40">
           <div className="max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="text-3xl font-bold font-mono">INCIDENTS</h1>
-                <p className="text-sm text-muted-foreground">Incident management and investigation</p>
+                <p className="text-sm text-muted-foreground">Correlated security incidents and investigation threads</p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                <Badge className="bg-cyan-500/10 text-cyan-300 border-cyan-500/30 border gap-2">
+                  <Radio className="w-3 h-3" />LIVE
+                </Badge>
                 <Badge className="bg-red-500/20 text-red-300 border-red-500/30 border">
-                  {incidents.filter(i => i.status === 'open').length} Open
+                  {incidents.filter((incident) => incident.status === 'open').length} Open
                 </Badge>
                 <Badge className="bg-yellow-500/20 text-yellow-300 border-yellow-500/30 border">
-                  {incidents.filter(i => i.status === 'investigating').length} Investigating
+                  {incidents.filter((incident) => incident.status === 'investigating').length} Investigating
                 </Badge>
               </div>
             </div>
@@ -112,87 +102,105 @@ export default function Incidents() {
         </div>
 
         <div className="max-w-7xl mx-auto px-6 py-8">
-          {/* Incident Timeline */}
-          <div className="space-y-4">
-            {incidents.map((incident) => (
-              <Card key={incident.id} className="glass glow-border p-6 hover:shadow-lg transition-all cursor-pointer">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <AlertTriangle className="w-5 h-5 text-accent flex-shrink-0" />
-                      <h3 className="font-mono font-bold text-lg">{incident.title}</h3>
+          {incidents.length === 0 ? (
+            <Card className="glass glow-border p-10 text-center">
+              <AlertTriangle className="w-8 h-8 mx-auto mb-3 text-muted-foreground" />
+              <p className="font-mono text-sm text-muted-foreground">No incidents generated yet.</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Run a scenario in Attack Lab to generate telemetry, detections, and correlated incidents.
+              </p>
+            </Card>
+          ) : (
+            <div className="space-y-4">
+              {incidents.map((incident) => {
+                const thread = snapshot.incidentThreads[incident.id - 1];
+                return (
+                  <Card key={incident.id} className="glass glow-border p-6 hover:shadow-lg transition-all">
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <AlertTriangle className="w-5 h-5 text-accent flex-shrink-0" />
+                          <h3 className="font-mono font-bold text-lg">{incident.title}</h3>
+                          {thread && thread.correlationStrength > 0 && (
+                            <Badge variant="outline" className="text-cyan-300 border-cyan-500/30 gap-1">
+                              <GitBranch className="w-3 h-3" />
+                              {Math.round(thread.correlationStrength * 100)}% correlated
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-foreground">{incident.description}</p>
+                      </div>
+                      <div className="flex flex-col gap-2 ml-4">
+                        <Badge className={`${getSeverityColor(incident.severity)} border`}>
+                          {incident.severity.toUpperCase()}
+                        </Badge>
+                        <Badge className={`${getStatusColor(incident.status)} border`}>
+                          {incident.status.toUpperCase()}
+                        </Badge>
+                      </div>
                     </div>
-                    <p className="text-sm text-muted-foreground">{incident.description}</p>
-                  </div>
-                  <div className="flex flex-col gap-2 ml-4">
-                    <Badge className={`${getSeverityColor(incident.severity)} border`}>
-                      {incident.severity.toUpperCase()}
-                    </Badge>
-                    <Badge className={`${getStatusColor(incident.status)} border`}>
-                      {incident.status.toUpperCase()}
-                    </Badge>
-                  </div>
-                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-4 border-t border-border/20">
-                  <div className="flex items-center gap-2 text-sm">
-                    <Clock className="w-4 h-4 text-muted-foreground" />
-                    <div>
-                      <p className="text-xs text-muted-foreground">Created</p>
-                      <p className="font-mono text-xs">{incident.created}</p>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-4 border-t border-border/20">
+                      <div className="flex items-center gap-2 text-sm">
+                        <Clock className="w-4 h-4 text-muted-foreground" />
+                        <div>
+                          <p className="text-xs text-muted-foreground">Last observed</p>
+                          <p className="font-mono text-xs">{incident.created}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm">
+                        <User className="w-4 h-4 text-muted-foreground" />
+                        <div>
+                          <p className="text-xs text-muted-foreground">Assignee</p>
+                          <p className="font-mono text-xs">{incident.assignee}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm">
+                        <FileText className="w-4 h-4 text-muted-foreground" />
+                        <div>
+                          <p className="text-xs text-muted-foreground">Evidence</p>
+                          <p className="font-mono text-xs">{incident.evidence} events</p>
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-xs"
+                          onClick={() => setSelectedIncident(incident)}
+                        >
+                          View Details
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    <User className="w-4 h-4 text-muted-foreground" />
-                    <div>
-                      <p className="text-xs text-muted-foreground">Assignee</p>
-                      <p className="font-mono text-xs">{incident.assignee}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    <FileText className="w-4 h-4 text-muted-foreground" />
-                    <div>
-                      <p className="text-xs text-muted-foreground">Evidence</p>
-                      <p className="font-mono text-xs">{incident.evidence} items</p>
-                    </div>
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-xs"
-                      onClick={() => setSelectedIncident(incident)}
-                    >
-                      View Details
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
 
-          {/* Incident Statistics */}
           <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card className="glass glow-border p-6">
-              <p className="text-sm text-muted-foreground mb-2 font-mono">MTTR (Mean Time to Resolve)</p>
-              <p className="text-3xl font-mono font-bold text-cyan-400">4.2 hours</p>
-              <p className="text-xs text-muted-foreground mt-2">Average response time</p>
+              <p className="text-sm text-muted-foreground mb-2 font-mono">Incident Threads</p>
+              <p className="text-3xl font-mono font-bold text-cyan-400">{snapshot.incidentThreads.length}</p>
+              <p className="text-xs text-muted-foreground mt-2">Correlation engine output</p>
             </Card>
             <Card className="glass glow-border p-6">
-              <p className="text-sm text-muted-foreground mb-2 font-mono">Total Incidents (30 days)</p>
-              <p className="text-3xl font-mono font-bold text-blue-400">24</p>
-              <p className="text-xs text-muted-foreground mt-2">↓ 15% from last month</p>
+              <p className="text-sm text-muted-foreground mb-2 font-mono">Critical Incidents</p>
+              <p className="text-3xl font-mono font-bold text-red-400">
+                {incidents.filter((incident) => severityRank[incident.severity] >= severityRank.critical).length}
+              </p>
+              <p className="text-xs text-muted-foreground mt-2">Require immediate investigation</p>
             </Card>
             <Card className="glass glow-border p-6">
-              <p className="text-sm text-muted-foreground mb-2 font-mono">Resolution Rate</p>
-              <p className="text-3xl font-mono font-bold text-green-400">92%</p>
-              <p className="text-xs text-muted-foreground mt-2">Successfully resolved</p>
+              <p className="text-sm text-muted-foreground mb-2 font-mono">Observed Events</p>
+              <p className="text-3xl font-mono font-bold text-blue-400">{snapshot.events.length}</p>
+              <p className="text-xs text-muted-foreground mt-2">Telemetry in current session</p>
             </Card>
           </div>
         </div>
       </main>
 
-      {/* Incident Detail Modal */}
       {selectedIncident && (
         <IncidentDetailModal
           isOpen={!!selectedIncident}

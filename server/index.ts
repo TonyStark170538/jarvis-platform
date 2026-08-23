@@ -1,33 +1,55 @@
-import express from "express";
-import { createServer } from "http";
-import path from "path";
-import { fileURLToPath } from "url";
+import cors from 'cors';
+import express from 'express';
+import { createServer } from 'http';
+import securityRouter from './security/routes';
+import { db, initializeSecurityDatabase } from './security/db';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const app = express();
+const server = createServer(app);
 
-async function startServer() {
-  const app = express();
-  const server = createServer(app);
+app.disable('x-powered-by');
+app.use(cors({ origin: process.env.FRONTEND_ORIGIN?.split(',') ?? true }));
+app.use(express.json({ limit: '256kb' }));
 
-  // Serve static files from dist/public in production
-  const staticPath =
-    process.env.NODE_ENV === "production"
-      ? path.resolve(__dirname, "public")
-      : path.resolve(__dirname, "..", "dist", "public");
+app.get('/api/health', async (_req, res) => {
+  if (!db) {
+    return res.status(503).json({
+      success: false,
+      service: 'jarvis-api',
+      status: 'database_not_configured',
+    });
+  }
 
-  app.use(express.static(staticPath));
+  try {
+    await db.query('SELECT 1');
+    return res.json({
+      success: true,
+      service: 'jarvis-api',
+      status: 'online',
+      database: 'connected',
+    });
+  } catch {
+    return res.status(503).json({
+      success: false,
+      service: 'jarvis-api',
+      status: 'database_unavailable',
+    });
+  }
+});
 
-  // Handle client-side routing - serve index.html for all routes
-  app.get("*", (_req, res) => {
-    res.sendFile(path.join(staticPath, "index.html"));
-  });
+app.use('/api/security', securityRouter);
 
-  const port = process.env.PORT || 3000;
+const port = Number(process.env.PORT ?? 3001);
 
-  server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
+async function start() {
+  await initializeSecurityDatabase();
+
+  server.listen(port, '0.0.0.0', () => {
+    console.log(`J.A.R.V.I.S. API running on port ${port}`);
   });
 }
 
-startServer().catch(console.error);
+start().catch((error) => {
+  console.error('[J.A.R.V.I.S.] API startup failed:', error);
+  process.exit(1);
+});
