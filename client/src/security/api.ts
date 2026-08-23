@@ -1,4 +1,4 @@
-import type { SecurityEvent } from './types';
+import type { DetectionResult, SecurityEvent, SecurityIncident } from './types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
@@ -10,8 +10,22 @@ export interface SecurityApiHealth {
 
 export interface SecuritySnapshot {
   events: SecurityEvent[];
-  incidents: unknown[];
-  devices: unknown[];
+  detections: DetectionResult[];
+  incidents: SecurityIncident[];
+  devices: string[];
+  updatedAt: string;
+}
+
+interface ApiEnvelope<T> {
+  success: boolean;
+  data: T;
+  error?: string;
+}
+
+interface IngestResponse {
+  event: SecurityEvent;
+  detections: DetectionResult[];
+  ingestionId: string;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -23,12 +37,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
 
+  const payload = (await response.json().catch(() => null)) as
+    | ApiEnvelope<T>
+    | { error?: string }
+    | null;
+
   if (!response.ok) {
-    const message = await response.text().catch(() => '');
-    throw new Error(message || `J.A.R.V.I.S. API request failed (${response.status})`);
+    throw new Error(payload?.error || `J.A.R.V.I.S. API request failed (${response.status})`);
   }
 
-  return response.json() as Promise<T>;
+  if (!payload || !('success' in payload) || !payload.success || !('data' in payload)) {
+    throw new Error('J.A.R.V.I.S. API returned an invalid response');
+  }
+
+  return payload.data;
 }
 
 export const securityApi = {
@@ -38,14 +60,15 @@ export const securityApi = {
 
   events: () => request<SecurityEvent[]>('/api/security/events'),
 
+  detections: () => request<DetectionResult[]>('/api/security/detections'),
+
+  incidents: () => request<SecurityIncident[]>('/api/security/incidents'),
+
   ingestEvent: (event: SecurityEvent) =>
-    request<{ success: boolean; event: SecurityEvent; detections: unknown[] }>(
-      '/api/security/events',
-      {
-        method: 'POST',
-        body: JSON.stringify(event),
-      }
-    ),
+    request<IngestResponse>('/api/security/events', {
+      method: 'POST',
+      body: JSON.stringify(event),
+    }),
 };
 
 export function isApiConfigured(): boolean {
