@@ -6,6 +6,7 @@ export interface SecurityApiHealth {
   success: boolean;
   service: string;
   status: string;
+  database?: string;
 }
 
 export interface SecuritySnapshot {
@@ -25,6 +26,7 @@ interface ApiEnvelope<T> {
 interface IngestResponse {
   event: SecurityEvent;
   detections: DetectionResult[];
+  incidents: SecurityIncident[];
   ingestionId: string;
 }
 
