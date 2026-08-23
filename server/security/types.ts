@@ -1,18 +1,87 @@
-import type { SecurityEvent, SecurityIncident } from "../../client/src/security/types";
+export type SecuritySeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 
-export interface IngestSecurityEventRequest {
-  event: SecurityEvent;
+export type SecurityEventType =
+  | 'authentication'
+  | 'network'
+  | 'process'
+  | 'file'
+  | 'malware'
+  | 'privilege'
+  | 'exfiltration'
+  | 'dns'
+  | 'web'
+  | 'system'
+  | 'detection';
+
+export type SecurityEventSource =
+  | 'simulation'
+  | 'suricata'
+  | 'zeek'
+  | 'splunk'
+  | 'endpoint'
+  | 'firewall'
+  | 'identity'
+  | 'manual';
+
+export interface SecurityEvent {
+  id: string;
+  timestamp: string;
+  type: SecurityEventType;
+  source: SecurityEventSource;
+  sourceSystem?: string;
+  title: string;
+  description: string;
+  severity: SecuritySeverity;
+  sourceIP?: string;
+  destinationIP?: string;
+  sourcePort?: number;
+  destinationPort?: number;
+  protocol?: string;
+  hostname?: string;
+  username?: string;
+  processName?: string;
+  filePath?: string;
+  mitreTechniques?: string[];
+  scenarioId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SecurityDetection {
+  id: string;
+  ruleId: string;
+  ruleName: string;
+  eventId: string;
+  timestamp: string;
+  severity: SecuritySeverity;
+  title: string;
+  description: string;
+  confidence: number;
+  mitreTechniques: string[];
+  sourceIP?: string;
+  destinationIP?: string;
+}
+
+export interface SecurityIncident {
+  id: string;
+  title: string;
+  severity: SecuritySeverity;
+  status: 'open' | 'investigating' | 'resolved';
+  eventIds: string[];
+  detectionIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SecuritySnapshot {
+  events: SecurityEvent[];
+  detections: SecurityDetection[];
+  incidents: SecurityIncident[];
+  devices: string[];
+  updatedAt: string;
 }
 
 export interface SecurityApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
-}
-
-export interface SecuritySnapshot {
-  events: SecurityEvent[];
-  incidents: SecurityIncident[];
-  devices: string[];
-  updatedAt: string;
 }
