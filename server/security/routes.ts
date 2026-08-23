@@ -30,7 +30,10 @@ const securityEventSchema = z.object({
 });
 
 router.get('/health', (_req, res) => {
-  res.json({ success: true, service: 'jarvis-security-api', status: 'online' });
+  res.json({
+    success: true,
+    data: { service: 'jarvis-security-api', status: 'online' },
+  });
 });
 
 router.get('/snapshot', (_req, res) => {
