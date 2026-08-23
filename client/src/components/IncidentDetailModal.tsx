@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { correlateEvents, createIncidentThreads } from '@/lib/incidentCorrelation';
 import IncidentCorrelationTab from '@/components/IncidentCorrelationTab';
 import ResponseActionPanel from '@/components/ResponseActionPanel';
-
+import type { SecuritySeverity } from '@/security/types';
 /**
  * Incident Detail Modal
  * Comprehensive incident investigation view with timeline, evidence, and MITRE mappings
@@ -49,7 +49,7 @@ interface IncidentDetailModalProps {
   incident: {
     id: number;
     title: string;
-    severity: 'critical' | 'high' | 'medium' | 'low';
+    severity: SecuritySeverity;
     status: 'open' | 'investigating' | 'resolved';
     created: string;
     assignee: string;

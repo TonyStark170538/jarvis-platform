@@ -118,6 +118,7 @@ export interface SecurityStoreSnapshot {
   incidentThreads: SecurityIncidentThread[];
   runs: ScenarioRun[];
   isSimulationRunning: boolean;
+  backendOnline: boolean;
 }
 
 export type SecurityStoreListener = (snapshot: SecurityStoreSnapshot) => void;

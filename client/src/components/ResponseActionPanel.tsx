@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Play, RotateCcw, AlertCircle, CheckCircle, Clock, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import type { SecuritySeverity } from '@/security/types';
 import {
   ResponseAction,
   ActionType,
@@ -16,7 +17,7 @@ import {
 
 interface ResponseActionPanelProps {
   incidentType: string;
-  incidentSeverity: 'critical' | 'high' | 'medium' | 'low';
+  incidentSeverity: SecuritySeverity;
   targetIP?: string;
   targetHost?: string;
 }
@@ -35,11 +36,21 @@ export default function ResponseActionPanel({
   const [executingActionId, setExecutingActionId] = useState<string | null>(null);
   const [expandedActionId, setExpandedActionId] = useState<string | null>(null);
 
-  const recommendedActionTypes = getRecommendedActions(incidentType, incidentSeverity);
+  const actionableSeverity =
+  incidentSeverity === 'info' ? 'low' : incidentSeverity;
+
+const recommendedActionTypes = getRecommendedActions(
+  incidentType,
+  actionableSeverity
+);
 
   // Create and queue an action
   const handleCreateAction = (actionType: ActionType, target: string) => {
-    const newAction = createResponseAction(actionType, target, incidentSeverity);
+    const newAction = createResponseAction(
+  actionType,
+  target,
+  actionableSeverity
+);
     setActions([...actions, newAction]);
   };
 
