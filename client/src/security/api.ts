@@ -29,7 +29,7 @@ export interface SecurityIncident {
 export interface SecuritySnapshot {
   events: SecurityEvent[];
   detections: DetectionResult[];
-  incidents: SecurityIncident[];
+  incidents: SecurityIncidentThread[];
   devices: string[];
   updatedAt: string;
 }
