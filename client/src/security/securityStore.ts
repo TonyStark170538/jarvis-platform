@@ -1,11 +1,12 @@
 import { createSecurityIncidentThreads } from '@/lib/incidentCorrelation';
 import { generateScenario, getAttackScenario } from './eventGenerator';
 import { evaluateEvent } from './detectionEngine';
-import { securityApi } from './api';
+import { securityApi, type SecurityIncidentStatus } from './api';
 import type {
   DetectionResult,
   ScenarioRun,
   SecurityEvent,
+  SecurityIncident,
   SecurityIncidentThread,
   SecurityStoreListener,
   SecurityStoreSnapshot,
@@ -15,6 +16,7 @@ const MAX_EVENTS = 500;
 const MAX_DETECTIONS = 250;
 const MAX_RUNS = 50;
 const MAX_INCIDENT_THREADS = 100;
+const MAX_INCIDENTS = 100;
 const BACKEND_POLL_INTERVAL_MS = 10_000;
 
 function createId(prefix: string): string {
@@ -25,16 +27,12 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
-/**
- * Browser-side security event bus.
- *
- * The Attack Lab can still run local simulations, but persisted security data
- * is hydrated from and periodically synchronized with the Render API.
- */
+/** Browser-side security event bus backed by the Render API when available. */
 export class SecurityStore {
   private events: SecurityEvent[] = [];
   private detections: DetectionResult[] = [];
   private incidentThreads: SecurityIncidentThread[] = [];
+  private incidents: SecurityIncident[] = [];
   private runs: ScenarioRun[] = [];
   private listeners = new Set<SecurityStoreListener>();
   private activeController: AbortController | null = null;
@@ -47,6 +45,7 @@ export class SecurityStore {
       events: [...this.events],
       detections: [...this.detections],
       incidentThreads: [...this.incidentThreads],
+      incidents: [...this.incidents],
       runs: [...this.runs],
       isSimulationRunning: this.simulationRunning,
       backendOnline: this.backendOnline,
@@ -75,11 +74,8 @@ export class SecurityStore {
 
   startBackendPolling(): void {
     if (this.pollingTimer) return;
-
     void this.connectBackend();
-    this.pollingTimer = setInterval(() => {
-      void this.hydrateFromBackend();
-    }, BACKEND_POLL_INTERVAL_MS);
+    this.pollingTimer = setInterval(() => void this.hydrateFromBackend(), BACKEND_POLL_INTERVAL_MS);
   }
 
   stopBackendPolling(): void {
@@ -91,10 +87,10 @@ export class SecurityStore {
   async hydrateFromBackend(): Promise<void> {
     try {
       const snapshot = await securityApi.snapshot();
-
       this.events = snapshot.events.slice(0, MAX_EVENTS);
       this.detections = snapshot.detections.slice(0, MAX_DETECTIONS);
-      this.incidentThreads = snapshot.incidents.slice(0, MAX_INCIDENT_THREADS);
+      this.incidents = snapshot.incidents.slice(0, MAX_INCIDENTS);
+      this.rebuildIncidentThreads();
       this.backendOnline = true;
       this.emit();
     } catch {
@@ -103,17 +99,19 @@ export class SecurityStore {
     }
   }
 
+  async updateIncidentStatus(id: string, status: SecurityIncidentStatus): Promise<SecurityIncident> {
+    const updated = await securityApi.updateIncidentStatus(id, status);
+    this.incidents = this.incidents.map((incident) => (incident.id === id ? updated : incident));
+    this.backendOnline = true;
+    this.emit();
+    return updated;
+  }
+
   ingestEvent(event: SecurityEvent): DetectionResult[] {
-    this.events = [event, ...this.events.filter((existing) => existing.id !== event.id)].slice(
-      0,
-      MAX_EVENTS
-    );
+    this.events = [event, ...this.events.filter((existing) => existing.id !== event.id)].slice(0, MAX_EVENTS);
 
     const newDetections = evaluateEvent(event, this.events);
-    const existingKeys = new Set(
-      this.detections.map((detection) => `${detection.ruleId}:${detection.eventId}`)
-    );
-
+    const existingKeys = new Set(this.detections.map((detection) => `${detection.ruleId}:${detection.eventId}`));
     for (const detection of newDetections) {
       const key = `${detection.ruleId}:${detection.eventId}`;
       if (!existingKeys.has(key)) this.detections.unshift(detection);
@@ -123,8 +121,7 @@ export class SecurityStore {
     this.rebuildIncidentThreads();
     this.emit();
 
-    void securityApi
-      .ingestEvent(event)
+    void securityApi.ingestEvent(event)
       .then(() => {
         this.backendOnline = true;
         void this.hydrateFromBackend();
@@ -144,25 +141,13 @@ export class SecurityStore {
   }
 
   async runScenario(scenarioId: string): Promise<ScenarioRun> {
-    if (this.simulationRunning) {
-      throw new Error('A security simulation is already running. Stop it before starting another.');
-    }
-
-    if (!getAttackScenario(scenarioId)) {
-      throw new Error(`Unknown attack scenario: ${scenarioId}`);
-    }
+    if (this.simulationRunning) throw new Error('A security simulation is already running. Stop it before starting another.');
+    if (!getAttackScenario(scenarioId)) throw new Error(`Unknown attack scenario: ${scenarioId}`);
 
     const controller = new AbortController();
     this.activeController = controller;
     this.simulationRunning = true;
-
-    const run: ScenarioRun = {
-      id: createId('run'),
-      scenarioId,
-      startedAt: new Date().toISOString(),
-      eventIds: [],
-    };
-
+    const run: ScenarioRun = { id: createId('run'), scenarioId, startedAt: new Date().toISOString(), eventIds: [] };
     this.runs = [run, ...this.runs].slice(0, MAX_RUNS);
     this.emit();
 
@@ -170,18 +155,13 @@ export class SecurityStore {
       await generateScenario({
         scenarioId,
         signal: controller.signal,
-        onEvent: (event) => {
-          run.eventIds.push(event.id);
-          this.ingestEvent(event);
-        },
+        onEvent: (event) => { run.eventIds.push(event.id); this.ingestEvent(event); },
       });
-
       run.completedAt = new Date().toISOString();
       this.replaceRun(run);
       return { ...run, eventIds: [...run.eventIds] };
     } catch (error) {
       if (!isAbortError(error)) throw error;
-
       run.completedAt = new Date().toISOString();
       this.replaceRun(run);
       return { ...run, eventIds: [...run.eventIds] };
@@ -194,9 +174,7 @@ export class SecurityStore {
     }
   }
 
-  stopSimulation(): void {
-    this.activeController?.abort();
-  }
+  stopSimulation(): void { this.activeController?.abort(); }
 
   clearEvents(): void {
     this.events = [];
@@ -205,10 +183,7 @@ export class SecurityStore {
     this.emit();
   }
 
-  clearRuns(): void {
-    this.runs = [];
-    this.emit();
-  }
+  clearRuns(): void { this.runs = []; this.emit(); }
 
   reset(): void {
     this.stopSimulation();
@@ -219,33 +194,12 @@ export class SecurityStore {
     this.emit();
   }
 
-  private rebuildLocalAnalysis(): void {
-    this.detections = [];
-    for (const event of [...this.events].reverse()) {
-      const detections = evaluateEvent(event, this.events);
-      const existingKeys = new Set(
-        this.detections.map((detection) => `${detection.ruleId}:${detection.eventId}`)
-      );
-      for (const detection of detections) {
-        const key = `${detection.ruleId}:${detection.eventId}`;
-        if (!existingKeys.has(key)) this.detections.push(detection);
-      }
-    }
-    this.detections = this.detections.slice(0, MAX_DETECTIONS);
-    this.rebuildIncidentThreads();
-  }
-
   private rebuildIncidentThreads(): void {
-    this.incidentThreads = createSecurityIncidentThreads(this.events).slice(
-      0,
-      MAX_INCIDENT_THREADS
-    );
+    this.incidentThreads = createSecurityIncidentThreads(this.events).slice(0, MAX_INCIDENT_THREADS);
   }
 
   private replaceRun(run: ScenarioRun): void {
-    this.runs = this.runs.map((existing) =>
-      existing.id === run.id ? { ...run, eventIds: [...run.eventIds] } : existing
-    );
+    this.runs = this.runs.map((existing) => existing.id === run.id ? { ...run, eventIds: [...run.eventIds] } : existing);
     this.emit();
   }
 
@@ -255,5 +209,4 @@ export class SecurityStore {
   }
 }
 
-/** Shared browser-side security event store. */
 export const securityStore = new SecurityStore();
