@@ -1,4 +1,3 @@
-import { nanoid } from 'nanoid';
 import type {
   SecurityDetection,
   SecurityEvent,
@@ -153,7 +152,9 @@ export function evaluateEvent(
           : rule.severity;
 
       return {
-        id: `det-${nanoid(12)}`,
+        // Deterministic identity makes retries idempotent: the same rule/event
+        // pair always maps to the same database record.
+        id: `det-${rule.id}-${event.id}`,
         ruleId: rule.id,
         ruleName: rule.name,
         eventId: event.id,
