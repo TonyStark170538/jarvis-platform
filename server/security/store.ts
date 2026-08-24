@@ -3,6 +3,7 @@ import type {
   SecurityDetection,
   SecurityEvent,
   SecurityIncident,
+  SecurityIncidentDetail,
   SecuritySnapshot,
 } from './types';
 
@@ -179,6 +180,79 @@ export async function getIncidents(limit = 100): Promise<SecurityIncident[]> {
   const safeLimit = Math.min(Math.max(limit, 1), 500);
   const result = await db.query('SELECT * FROM security_incidents ORDER BY updated_at DESC LIMIT $1', [safeLimit]);
   return result.rows.map(mapIncident);
+}
+
+export async function getIncidentDetail(id: string): Promise<SecurityIncidentDetail | null> {
+  const db = requireDb();
+  const incidentResult = await db.query('SELECT * FROM security_incidents WHERE id = $1 LIMIT 1', [id]);
+  if (incidentResult.rows.length === 0) return null;
+
+  const incident = mapIncident(incidentResult.rows[0]);
+  const [eventsResult, detectionsResult] = await Promise.all([
+    db.query('SELECT * FROM security_events WHERE id = ANY($1::text[]) ORDER BY timestamp ASC', [incident.eventIds]),
+    db.query('SELECT * FROM security_detections WHERE id = ANY($1::text[]) ORDER BY timestamp ASC', [incident.detectionIds]),
+  ]);
+
+  const events = eventsResult.rows.map(mapEvent);
+  const detections = detectionsResult.rows.map(mapDetection);
+  const techniqueSet = new Set<string>();
+  const timeline: SecurityIncidentDetail['timeline'] = [];
+
+  for (const event of events) {
+    for (const technique of event.mitreTechniques ?? []) techniqueSet.add(technique);
+    timeline.push({
+      timestamp: event.timestamp,
+      kind: 'event',
+      id: event.id,
+      title: event.title,
+      severity: event.severity,
+      mitreTechniques: event.mitreTechniques ?? [],
+    });
+  }
+
+  for (const detection of detections) {
+    for (const technique of detection.mitreTechniques) techniqueSet.add(technique);
+    timeline.push({
+      timestamp: detection.timestamp,
+      kind: 'detection',
+      id: detection.id,
+      title: detection.title,
+      severity: detection.severity,
+      mitreTechniques: detection.mitreTechniques,
+    });
+  }
+
+  timeline.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+  const confidence = detections.length === 0
+    ? 0
+    : Math.min(1, detections.reduce((sum, detection) => sum + detection.confidence, 0) / detections.length);
+
+  const reasons = [
+    `${events.length} related telemetry events`,
+    `${detections.length} detection${detections.length === 1 ? '' : 's'} matched`,
+  ];
+
+  const sourceIPs = new Set(events.map((event) => event.sourceIP).filter(Boolean));
+  const hostnames = new Set(events.map((event) => event.hostname).filter(Boolean));
+  const usernames = new Set(events.map((event) => event.username).filter(Boolean));
+  if (sourceIPs.size === 1) reasons.push('shared source IP across the event chain');
+  if (hostnames.size === 1) reasons.push('shared hostname across the event chain');
+  if (usernames.size === 1) reasons.push('shared username across the event chain');
+
+  return {
+    incident,
+    events,
+    detections,
+    attackTechniques: [...techniqueSet],
+    timeline,
+    correlation: {
+      eventCount: events.length,
+      detectionCount: detections.length,
+      confidence,
+      reasons,
+    },
+  };
 }
 
 export async function getDevices(): Promise<string[]> {
