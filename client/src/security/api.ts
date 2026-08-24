@@ -6,6 +6,8 @@ import type {
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
+export type SecurityIncidentStatus = 'open' | 'investigating' | 'resolved';
+
 export interface SecurityApiHealth {
   success: boolean;
   service: string;
@@ -13,10 +15,21 @@ export interface SecurityApiHealth {
   database?: string;
 }
 
+export interface SecurityIncident {
+  id: string;
+  title: string;
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  status: SecurityIncidentStatus;
+  eventIds: string[];
+  detectionIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SecuritySnapshot {
   events: SecurityEvent[];
   detections: DetectionResult[];
-  incidents: SecurityIncidentThread[];
+  incidents: SecurityIncident[];
   devices: string[];
   updatedAt: string;
 }
@@ -61,16 +74,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const securityApi = {
   health: () => request<SecurityApiHealth>('/api/security/health'),
-
   snapshot: () => request<SecuritySnapshot>('/api/security/snapshot'),
-
   events: () => request<SecurityEvent[]>('/api/security/events'),
-
   detections: () => request<DetectionResult[]>('/api/security/detections'),
-
-  incidents: () =>
-  request<SecurityIncidentThread[]>('/api/security/incidents'),
-
+  incidents: () => request<SecurityIncidentThread[]>('/api/security/incidents'),
+  updateIncidentStatus: (id: string, status: SecurityIncidentStatus) =>
+    request<SecurityIncident>(`/api/security/incidents/${encodeURIComponent(id)}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
   ingestEvent: (event: SecurityEvent) =>
     request<IngestResponse>('/api/security/events', {
       method: 'POST',
