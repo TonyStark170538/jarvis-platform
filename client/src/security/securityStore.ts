@@ -15,6 +15,7 @@ const MAX_EVENTS = 500;
 const MAX_DETECTIONS = 250;
 const MAX_RUNS = 50;
 const MAX_INCIDENT_THREADS = 100;
+const BACKEND_POLL_INTERVAL_MS = 10_000;
 
 function createId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -27,8 +28,8 @@ function isAbortError(error: unknown): boolean {
 /**
  * Browser-side security event bus.
  *
- * Local simulation remains available for the Attack Lab, while every ingested
- * event is also sent to the separate Render API when the request succeeds.
+ * The Attack Lab can still run local simulations, but persisted security data
+ * is hydrated from and periodically synchronized with the Render API.
  */
 export class SecurityStore {
   private events: SecurityEvent[] = [];
@@ -37,6 +38,7 @@ export class SecurityStore {
   private runs: ScenarioRun[] = [];
   private listeners = new Set<SecurityStoreListener>();
   private activeController: AbortController | null = null;
+  private pollingTimer: ReturnType<typeof setInterval> | null = null;
   private simulationRunning = false;
   private backendOnline = false;
 
@@ -60,8 +62,8 @@ export class SecurityStore {
   async connectBackend(): Promise<boolean> {
     try {
       await securityApi.health();
-      this.backendOnline = true;
       await this.hydrateFromBackend();
+      this.backendOnline = true;
       this.emit();
       return true;
     } catch {
@@ -71,11 +73,28 @@ export class SecurityStore {
     }
   }
 
+  startBackendPolling(): void {
+    if (this.pollingTimer) return;
+
+    void this.connectBackend();
+    this.pollingTimer = setInterval(() => {
+      void this.hydrateFromBackend();
+    }, BACKEND_POLL_INTERVAL_MS);
+  }
+
+  stopBackendPolling(): void {
+    if (!this.pollingTimer) return;
+    clearInterval(this.pollingTimer);
+    this.pollingTimer = null;
+  }
+
   async hydrateFromBackend(): Promise<void> {
     try {
       const snapshot = await securityApi.snapshot();
+
       this.events = snapshot.events.slice(0, MAX_EVENTS);
-      this.rebuildLocalAnalysis();
+      this.detections = snapshot.detections.slice(0, MAX_DETECTIONS);
+      this.incidentThreads = snapshot.incidents.slice(0, MAX_INCIDENT_THREADS);
       this.backendOnline = true;
       this.emit();
     } catch {
@@ -104,13 +123,11 @@ export class SecurityStore {
     this.rebuildIncidentThreads();
     this.emit();
 
-    // The local UI stays responsive even if the backend is unavailable.
-    // The API becomes the shared source of truth once Render is configured.
     void securityApi
       .ingestEvent(event)
       .then(() => {
         this.backendOnline = true;
-        this.emit();
+        void this.hydrateFromBackend();
       })
       .catch(() => {
         this.backendOnline = false;
