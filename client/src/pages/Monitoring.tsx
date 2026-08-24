@@ -204,9 +204,9 @@ export default function Monitoring() {
                         {securityEvents.map((event) => (
                           <tr key={event.id} className="border-b border-border/10 hover:bg-card/20 transition-colors">
                             <td className="py-2 px-3 font-mono text-xs text-muted-foreground">{formatTime(event.timestamp)}</td>
-                            <td className="py-2 px-3 text-xs">{event.eventType}</td>
+                            <td className="py-2 px-3 text-xs">{event.type}</td>
                             <td className="py-2 px-3 font-mono text-xs">{event.source}</td>
-                            <td className="py-2 px-3 font-mono text-xs">{event.destination ?? '—'}</td>
+                            <td className="py-2 px-3 font-mono text-xs">{event.destinationIP ?? '—'}</td>
                             <td className="py-2 px-3">
                               <Badge className={`${getSeverityColor(event.severity)} border text-[10px]`}>{event.severity.toUpperCase()}</Badge>
                             </td>
