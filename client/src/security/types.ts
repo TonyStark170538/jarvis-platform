@@ -5,29 +5,15 @@
  */
 
 export type SecuritySeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
+export type SecurityIncidentStatus = 'open' | 'investigating' | 'resolved';
 
 export type SecurityEventType =
-  | 'authentication'
-  | 'network'
-  | 'process'
-  | 'file'
-  | 'malware'
-  | 'privilege'
-  | 'exfiltration'
-  | 'dns'
-  | 'web'
-  | 'system'
-  | 'detection';
+  | 'authentication' | 'network' | 'process' | 'file' | 'malware'
+  | 'privilege' | 'exfiltration' | 'dns' | 'web' | 'system' | 'detection';
 
 export type SecurityEventSource =
-  | 'simulation'
-  | 'suricata'
-  | 'zeek'
-  | 'splunk'
-  | 'endpoint'
-  | 'firewall'
-  | 'identity'
-  | 'manual';
+  | 'simulation' | 'suricata' | 'zeek' | 'splunk' | 'endpoint'
+  | 'firewall' | 'identity' | 'manual';
 
 export interface SecurityEvent {
   id: string;
@@ -98,6 +84,17 @@ export interface ScenarioRun {
   eventIds: string[];
 }
 
+export interface SecurityIncident {
+  id: string;
+  title: string;
+  severity: SecuritySeverity;
+  status: SecurityIncidentStatus;
+  eventIds: string[];
+  detectionIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SecurityIncidentThread {
   id: string;
   rootEventId: string;
@@ -116,6 +113,7 @@ export interface SecurityStoreSnapshot {
   events: SecurityEvent[];
   detections: DetectionResult[];
   incidentThreads: SecurityIncidentThread[];
+  incidents: SecurityIncident[];
   runs: ScenarioRun[];
   isSimulationRunning: boolean;
   backendOnline: boolean;
