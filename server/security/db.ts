@@ -78,6 +78,8 @@ export async function initializeSecurityDatabase(): Promise<void> {
       ON security_detections (timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_security_detections_event_id
       ON security_detections (event_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_security_detections_rule_event
+      ON security_detections (rule_id, event_id);
 
     CREATE TABLE IF NOT EXISTS security_incidents (
       id TEXT PRIMARY KEY,
