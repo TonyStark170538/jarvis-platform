@@ -72,6 +72,27 @@ export interface SecurityIncident {
   updatedAt: string;
 }
 
+export interface SecurityIncidentDetail {
+  incident: SecurityIncident;
+  events: SecurityEvent[];
+  detections: SecurityDetection[];
+  attackTechniques: string[];
+  timeline: Array<{
+    timestamp: string;
+    kind: 'event' | 'detection';
+    id: string;
+    title: string;
+    severity: SecuritySeverity;
+    mitreTechniques: string[];
+  }>;
+  correlation: {
+    eventCount: number;
+    detectionCount: number;
+    confidence: number;
+    reasons: string[];
+  };
+}
+
 export interface SecuritySnapshot {
   events: SecurityEvent[];
   detections: SecurityDetection[];
