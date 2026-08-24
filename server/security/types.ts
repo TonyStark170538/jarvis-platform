@@ -72,6 +72,7 @@ export interface SecurityIncident {
   updatedAt: string;
 }
 
+<<<<<<< HEAD
 export interface SecurityIncidentDetail {
   incident: SecurityIncident;
   events: SecurityEvent[];
@@ -93,6 +94,8 @@ export interface SecurityIncidentDetail {
   };
 }
 
+=======
+>>>>>>> origin/main
 export interface SecuritySnapshot {
   events: SecurityEvent[];
   detections: SecurityDetection[];

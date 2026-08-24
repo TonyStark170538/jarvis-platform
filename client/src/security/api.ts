@@ -1,4 +1,8 @@
-import type { DetectionResult, SecurityEvent, SecurityIncident } from './types';
+import type {
+  DetectionResult,
+  SecurityEvent,
+  SecurityIncidentThread,
+} from './types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
@@ -12,7 +16,7 @@ export interface SecurityApiHealth {
 export interface SecuritySnapshot {
   events: SecurityEvent[];
   detections: DetectionResult[];
-  incidents: SecurityIncident[];
+  incidents: SecurityIncidentThread[];
   devices: string[];
   updatedAt: string;
 }
@@ -26,7 +30,7 @@ interface ApiEnvelope<T> {
 interface IngestResponse {
   event: SecurityEvent;
   detections: DetectionResult[];
-  incidents: SecurityIncident[];
+  incidents: SecurityIncidentThread[];
   ingestionId: string;
 }
 
@@ -64,7 +68,8 @@ export const securityApi = {
 
   detections: () => request<DetectionResult[]>('/api/security/detections'),
 
-  incidents: () => request<SecurityIncident[]>('/api/security/incidents'),
+  incidents: () =>
+  request<SecurityIncidentThread[]>('/api/security/incidents'),
 
   ingestEvent: (event: SecurityEvent) =>
     request<IngestResponse>('/api/security/events', {

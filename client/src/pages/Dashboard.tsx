@@ -16,7 +16,13 @@ export default function Dashboard() {
   const highCount = snapshot.detections.filter((detection) => detection.severity === 'high').length;
   const riskScore = useMemo(() => {
     if (snapshot.events.length === 0) return 0;
-    const weights: Record<SecuritySeverity, number> = { low: 1, medium: 3, high: 6, critical: 10 };
+    const weights: Record<SecuritySeverity, number> = {
+  info: 0,
+  low: 1,
+  medium: 3,
+  high: 6,
+  critical: 10,
+};
     const weighted = snapshot.events.reduce((sum, event) => sum + weights[event.severity], 0);
     return Math.min(10, Number((weighted / Math.max(snapshot.events.length, 1)).toFixed(1)));
   }, [snapshot.events]);
