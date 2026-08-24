@@ -2,7 +2,6 @@ import type {
   DetectionResult,
   SecurityEvent,
   SecurityIncident,
-  SecurityIncidentThread,
 } from './types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
@@ -14,6 +13,27 @@ export interface SecurityApiHealth {
   service: string;
   status: string;
   database?: string;
+}
+
+export interface SecurityIncidentDetail {
+  incident: SecurityIncident;
+  events: SecurityEvent[];
+  detections: DetectionResult[];
+  attackTechniques: string[];
+  timeline: Array<{
+    timestamp: string;
+    kind: 'event' | 'detection';
+    id: string;
+    title: string;
+    severity: SecurityIncident['severity'];
+    mitreTechniques: string[];
+  }>;
+  correlation: {
+    eventCount: number;
+    detectionCount: number;
+    confidence: number;
+    reasons: string[];
+  };
 }
 
 export interface SecuritySnapshot {
@@ -69,7 +89,7 @@ export const securityApi = {
   detections: () => request<DetectionResult[]>('/api/security/detections'),
   incidents: () => request<SecurityIncident[]>('/api/security/incidents'),
   incidentDetail: (id: string) =>
-    request<SecurityIncidentThread>(`/api/security/incidents/${encodeURIComponent(id)}`),
+    request<SecurityIncidentDetail>(`/api/security/incidents/${encodeURIComponent(id)}`),
   updateIncidentStatus: (id: string, status: SecurityIncidentStatus) =>
     request<SecurityIncident>(`/api/security/incidents/${encodeURIComponent(id)}/status`, {
       method: 'PATCH',
