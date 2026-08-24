@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
@@ -12,7 +13,7 @@ import Assets from "./pages/Assets";
 import Reports from "./pages/Reports";
 import Intelligence from "./pages/Intelligence";
 import Settings from "./pages/Settings";
-
+import { securityStore } from "./security/securityStore";
 
 function Router() {
   return (
@@ -26,13 +27,20 @@ function Router() {
       <Route path={"/intelligence"} component={Intelligence} />
       <Route path={"/settings"} component={Settings} />
       <Route path={"/404"} component={NotFound} />
-      {/* Final fallback route */}
       <Route component={NotFound} />
     </Switch>
   );
 }
 
 function App() {
+  useEffect(() => {
+    securityStore.startBackendPolling();
+
+    return () => {
+      securityStore.stopBackendPolling();
+    };
+  }, []);
+
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="dark" switchable>
