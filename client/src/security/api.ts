@@ -1,6 +1,7 @@
 import type {
   DetectionResult,
   SecurityEvent,
+  SecurityIncident,
   SecurityIncidentThread,
 } from './types';
 
@@ -15,21 +16,10 @@ export interface SecurityApiHealth {
   database?: string;
 }
 
-export interface SecurityIncident {
-  id: string;
-  title: string;
-  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
-  status: SecurityIncidentStatus;
-  eventIds: string[];
-  detectionIds: string[];
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface SecuritySnapshot {
   events: SecurityEvent[];
   detections: DetectionResult[];
-  incidents: SecurityIncidentThread[];
+  incidents: SecurityIncident[];
   devices: string[];
   updatedAt: string;
 }
@@ -43,7 +33,7 @@ interface ApiEnvelope<T> {
 interface IngestResponse {
   event: SecurityEvent;
   detections: DetectionResult[];
-  incidents: SecurityIncidentThread[];
+  incidents: SecurityIncident[];
   ingestionId: string;
 }
 
@@ -77,7 +67,9 @@ export const securityApi = {
   snapshot: () => request<SecuritySnapshot>('/api/security/snapshot'),
   events: () => request<SecurityEvent[]>('/api/security/events'),
   detections: () => request<DetectionResult[]>('/api/security/detections'),
-  incidents: () => request<SecurityIncidentThread[]>('/api/security/incidents'),
+  incidents: () => request<SecurityIncident[]>('/api/security/incidents'),
+  incidentDetail: (id: string) =>
+    request<SecurityIncidentThread>(`/api/security/incidents/${encodeURIComponent(id)}`),
   updateIncidentStatus: (id: string, status: SecurityIncidentStatus) =>
     request<SecurityIncident>(`/api/security/incidents/${encodeURIComponent(id)}/status`, {
       method: 'PATCH',
