@@ -6,10 +6,9 @@ import { createServer } from "http";
 // server/security/routes.ts
 import { Router } from "express";
 import { z } from "zod";
-import { nanoid as nanoid2 } from "nanoid";
+import { nanoid } from "nanoid";
 
 // server/security/detectionEngine.ts
-import { nanoid } from "nanoid";
 var severityWeight = {
   info: 0,
   low: 1,
@@ -24,11 +23,27 @@ function contains(text, ...terms) {
 function hasTechnique(event, technique) {
   return event.mitreTechniques?.includes(technique) ?? false;
 }
+function relatedEvents(event, history, windowMs = 12e4) {
+  const eventTime = new Date(event.timestamp).getTime();
+  return history.filter((candidate) => {
+    if (candidate.id === event.id) return false;
+    if (!event.sourceIP || candidate.sourceIP !== event.sourceIP) return false;
+    const candidateTime = new Date(candidate.timestamp).getTime();
+    return candidateTime <= eventTime && eventTime - candidateTime <= windowMs;
+  });
+}
+function confidenceFor(event, history, technique, minimumRelatedEvents = 0) {
+  const related = relatedEvents(event, history);
+  let confidence = hasTechnique(event, technique) ? 72 : 60;
+  if (related.length >= minimumRelatedEvents) confidence += 12;
+  if (event.severity === "high" || event.severity === "critical") confidence += 8;
+  return Math.min(99, confidence);
+}
 var DETECTION_RULES = [
   {
     id: "DET-SSH-BRUTE-FORCE",
     name: "SSH Brute Force",
-    description: "Repeated SSH authentication failures indicate possible brute-force activity.",
+    description: "Detects repeated SSH authentication failures from the same source.",
     severity: "critical",
     mitreTechniques: ["T1110"],
     match: (event) => event.type === "authentication" && event.destinationPort === 22 && (contains(event.title, "ssh", "failure") || contains(event.description, "ssh", "authentication"))
@@ -36,7 +51,7 @@ var DETECTION_RULES = [
   {
     id: "DET-PORT-SCAN",
     name: "Network Port Scan",
-    description: "Network reconnaissance activity consistent with port scanning was observed.",
+    description: "Detects network reconnaissance consistent with port scanning.",
     severity: "high",
     mitreTechniques: ["T1046"],
     match: (event) => event.type === "network" && (contains(event.title, "port", "scan") || hasTechnique(event, "T1046"))
@@ -44,7 +59,7 @@ var DETECTION_RULES = [
   {
     id: "DET-POWERSHELL",
     name: "Suspicious PowerShell Execution",
-    description: "PowerShell execution contains indicators associated with suspicious or encoded activity.",
+    description: "Detects suspicious PowerShell and encoded command activity.",
     severity: "high",
     mitreTechniques: ["T1059.001"],
     match: (event) => (event.processName?.toLowerCase() === "powershell.exe" || contains(event.title, "powershell")) && (contains(event.title, "suspicious") || contains(event.title, "encoded") || contains(event.description, "encoded"))
@@ -52,7 +67,7 @@ var DETECTION_RULES = [
   {
     id: "DET-DATA-EXFILTRATION",
     name: "Potential Data Exfiltration",
-    description: "Suspicious outbound data transfer may indicate attempted exfiltration.",
+    description: "Detects suspicious outbound transfer associated with sensitive data.",
     severity: "critical",
     mitreTechniques: ["T1041", "T1560"],
     match: (event) => event.type === "exfiltration" || contains(event.title, "data", "loss", "prevention") || contains(event.title, "large", "outbound", "transfer")
@@ -60,7 +75,7 @@ var DETECTION_RULES = [
   {
     id: "DET-MALWARE",
     name: "Malware Detection",
-    description: "Malware or suspicious executable activity was detected.",
+    description: "Detects malware signatures or suspicious executable activity.",
     severity: "critical",
     mitreTechniques: ["T1204.002"],
     match: (event) => event.type === "malware" || contains(event.title, "malware", "signature") || contains(event.title, "suspicious", "executable")
@@ -68,23 +83,27 @@ var DETECTION_RULES = [
   {
     id: "DET-PRIVILEGE-ESCALATION",
     name: "Privilege Escalation Indicator",
-    description: "Activity indicates possible privilege elevation.",
+    description: "Detects simulated privilege elevation activity.",
     severity: "high",
     mitreTechniques: ["T1548"],
     match: (event) => event.type === "privilege" || contains(event.title, "privilege", "escalation") || contains(event.description, "elevated", "privileges")
   }
 ];
-function evaluateEvent(event, history = []) {
-  return DETECTION_RULES.filter((rule) => rule.match(event)).map((rule) => {
-    const relatedCount = history.filter(
-      (candidate) => candidate.id !== event.id && candidate.sourceIP === event.sourceIP && Math.abs(new Date(event.timestamp).getTime() - new Date(candidate.timestamp).getTime()) <= 12e4
-    ).length;
-    let confidence = event.mitreTechniques?.some((t) => rule.mitreTechniques.includes(t)) ? 72 : 60;
-    if (relatedCount > 0) confidence += 12;
-    if (event.severity === "high" || event.severity === "critical") confidence += 8;
+function evaluateEvent(event, history = [], rules = DETECTION_RULES) {
+  return rules.filter((rule) => rule.match(event)).map((rule) => {
+    const related = relatedEvents(event, history);
+    const relatedCount = related.length;
+    const confidence = confidenceFor(
+      event,
+      history,
+      rule.mitreTechniques[0],
+      rule.id === "DET-SSH-BRUTE-FORCE" ? 2 : 0
+    );
     const severity = severityWeight[event.severity] > severityWeight[rule.severity] ? event.severity : rule.severity;
     return {
-      id: nanoid(),
+      // Deterministic identity makes retries idempotent: the same rule/event
+      // pair always maps to the same database record.
+      id: `det-${rule.id}-${event.id}`,
       ruleId: rule.id,
       ruleName: rule.name,
       eventId: event.id,
@@ -92,8 +111,10 @@ function evaluateEvent(event, history = []) {
       severity,
       title: rule.name,
       description: `${rule.description}${relatedCount > 0 ? ` ${relatedCount} related event(s) found in the correlation window.` : ""}`,
-      confidence: Math.min(99, confidence),
-      mitreTechniques: Array.from(/* @__PURE__ */ new Set([...event.mitreTechniques ?? [], ...rule.mitreTechniques])),
+      confidence,
+      mitreTechniques: Array.from(
+        /* @__PURE__ */ new Set([...event.mitreTechniques ?? [], ...rule.mitreTechniques])
+      ),
       sourceIP: event.sourceIP,
       destinationIP: event.destinationIP
     };
@@ -172,6 +193,8 @@ async function initializeSecurityDatabase() {
       ON security_detections (timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_security_detections_event_id
       ON security_detections (event_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_security_detections_rule_event
+      ON security_detections (rule_id, event_id);
 
     CREATE TABLE IF NOT EXISTS security_incidents (
       id TEXT PRIMARY KEY,
@@ -350,6 +373,67 @@ async function getIncidents(limit = 100) {
   const result = await db2.query("SELECT * FROM security_incidents ORDER BY updated_at DESC LIMIT $1", [safeLimit]);
   return result.rows.map(mapIncident);
 }
+async function getIncidentDetail(id) {
+  const db2 = requireDb();
+  const incidentResult = await db2.query("SELECT * FROM security_incidents WHERE id = $1 LIMIT 1", [id]);
+  if (incidentResult.rows.length === 0) return null;
+  const incident = mapIncident(incidentResult.rows[0]);
+  const [eventsResult, detectionsResult] = await Promise.all([
+    db2.query("SELECT * FROM security_events WHERE id = ANY($1::text[]) ORDER BY timestamp ASC", [incident.eventIds]),
+    db2.query("SELECT * FROM security_detections WHERE id = ANY($1::text[]) ORDER BY timestamp ASC", [incident.detectionIds])
+  ]);
+  const events = eventsResult.rows.map(mapEvent);
+  const detections = detectionsResult.rows.map(mapDetection);
+  const techniqueSet = /* @__PURE__ */ new Set();
+  const timeline = [];
+  for (const event of events) {
+    for (const technique of event.mitreTechniques ?? []) techniqueSet.add(technique);
+    timeline.push({
+      timestamp: event.timestamp,
+      kind: "event",
+      id: event.id,
+      title: event.title,
+      severity: event.severity,
+      mitreTechniques: event.mitreTechniques ?? []
+    });
+  }
+  for (const detection of detections) {
+    for (const technique of detection.mitreTechniques) techniqueSet.add(technique);
+    timeline.push({
+      timestamp: detection.timestamp,
+      kind: "detection",
+      id: detection.id,
+      title: detection.title,
+      severity: detection.severity,
+      mitreTechniques: detection.mitreTechniques
+    });
+  }
+  timeline.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const confidence = detections.length === 0 ? 0 : Math.min(1, detections.reduce((sum, detection) => sum + detection.confidence, 0) / detections.length);
+  const reasons = [
+    `${events.length} related telemetry events`,
+    `${detections.length} detection${detections.length === 1 ? "" : "s"} matched`
+  ];
+  const sourceIPs = new Set(events.map((event) => event.sourceIP).filter(Boolean));
+  const hostnames = new Set(events.map((event) => event.hostname).filter(Boolean));
+  const usernames = new Set(events.map((event) => event.username).filter(Boolean));
+  if (sourceIPs.size === 1) reasons.push("shared source IP across the event chain");
+  if (hostnames.size === 1) reasons.push("shared hostname across the event chain");
+  if (usernames.size === 1) reasons.push("shared username across the event chain");
+  return {
+    incident,
+    events,
+    detections,
+    attackTechniques: [...techniqueSet],
+    timeline,
+    correlation: {
+      eventCount: events.length,
+      detectionCount: detections.length,
+      confidence,
+      reasons
+    }
+  };
+}
 async function getDevices() {
   const db2 = requireDb();
   const result = await db2.query(
@@ -410,11 +494,41 @@ function highestSeverity(values) {
     "info"
   );
 }
+function correlationKeys(event) {
+  return [
+    event.sourceIP ? `ip:${event.sourceIP}` : null,
+    event.hostname ? `host:${event.hostname}` : null,
+    event.username ? `user:${event.username}` : null,
+    event.scenarioId ? `scenario:${event.scenarioId}` : null
+  ].filter((value) => Boolean(value));
+}
+function shareCorrelationKey(a, b) {
+  const keys = new Set(correlationKeys(a));
+  return correlationKeys(b).some((key) => keys.has(key));
+}
+function correlationReasons(event, candidates) {
+  const reasons = /* @__PURE__ */ new Set();
+  if (event.sourceIP && candidates.some((candidate) => candidate.sourceIP === event.sourceIP)) {
+    reasons.add("shared source IP");
+  }
+  if (event.hostname && candidates.some((candidate) => candidate.hostname === event.hostname)) {
+    reasons.add("shared hostname");
+  }
+  if (event.username && candidates.some((candidate) => candidate.username === event.username)) {
+    reasons.add("shared username");
+  }
+  if (event.scenarioId && candidates.some((candidate) => candidate.scenarioId === event.scenarioId)) {
+    reasons.add("shared attack scenario");
+  }
+  if (candidates.some((candidate) => candidate.destinationIP === event.sourceIP)) {
+    reasons.add("source/destination relationship");
+  }
+  return [...reasons];
+}
 async function createIncidentFromDetection(event, detection) {
   const recentEvents = (await getEvents(1e3)).filter((candidate) => {
-    if (!event.sourceIP || candidate.sourceIP !== event.sourceIP) return false;
     const diff = Math.abs(new Date(event.timestamp).getTime() - new Date(candidate.timestamp).getTime());
-    return diff <= 5 * 60 * 1e3;
+    return diff <= 10 * 60 * 1e3 && shareCorrelationKey(event, candidate);
   });
   if (recentEvents.length < 2) return null;
   const recentEventIds = recentEvents.map((item) => item.id);
@@ -425,19 +539,26 @@ async function createIncidentFromDetection(event, detection) {
     (incident2) => incident2.status !== "resolved" && incident2.eventIds.some((id) => recentEventIds.includes(id))
   );
   const now = (/* @__PURE__ */ new Date()).toISOString();
+  const reasons = correlationReasons(event, recentEvents);
+  const techniques = Array.from(new Set(recentDetections.flatMap((item) => item.mitreTechniques)));
+  const chainLabel = techniques.length > 0 ? ` [${techniques.slice(0, 3).join(" \u2192 ")}]` : "";
   const incident = {
-    id: existing?.id ?? `inc-${nanoid2(10)}`,
-    title: existing?.title ?? `${detection.ruleName} activity detected`,
+    id: existing?.id ?? `inc-${nanoid(10)}`,
+    title: existing?.title ?? `${detection.ruleName} activity detected${chainLabel}`,
     severity: highestSeverity([
       detection.severity,
       ...recentDetections.map((item) => item.severity)
     ]),
     status: existing?.status ?? "investigating",
     eventIds: Array.from(/* @__PURE__ */ new Set([...existing?.eventIds ?? [], ...recentEventIds])),
-    detectionIds: Array.from(/* @__PURE__ */ new Set([...existing?.detectionIds ?? [], ...recentDetections.map((item) => item.id)])),
+    detectionIds: Array.from(/* @__PURE__ */ new Set([
+      ...existing?.detectionIds ?? [],
+      ...recentDetections.map((item) => item.id)
+    ])),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now
   };
+  void reasons;
   return addIncident(incident);
 }
 router.get("/health", async (_req, res) => {
@@ -490,7 +611,7 @@ router.post("/events", async (req, res, next) => {
         event,
         detections,
         incidents,
-        ingestionId: nanoid2()
+        ingestionId: nanoid()
       }
     });
   } catch (error) {
@@ -513,6 +634,20 @@ router.get("/incidents", async (_req, res, next) => {
     next(error);
   }
 });
+router.get("/incidents/:id", async (req, res, next) => {
+  try {
+    const detail = await getIncidentDetail(req.params.id);
+    if (!detail) {
+      return res.status(404).json({
+        success: false,
+        error: "Incident not found"
+      });
+    }
+    return res.json({ success: true, data: detail });
+  } catch (error) {
+    next(error);
+  }
+});
 router.get("/devices", async (_req, res, next) => {
   try {
     res.json({ success: true, data: await getDevices() });
@@ -521,6 +656,63 @@ router.get("/devices", async (_req, res, next) => {
   }
 });
 var routes_default = router;
+
+// server/security/incidentRoutes.ts
+import { Router as Router2 } from "express";
+import { z as z2 } from "zod";
+
+// server/security/incidentLifecycle.ts
+function mapIncident2(row) {
+  return {
+    id: String(row.id),
+    title: String(row.title),
+    severity: row.severity,
+    status: row.status,
+    eventIds: row.event_ids ?? [],
+    detectionIds: row.detection_ids ?? [],
+    createdAt: new Date(String(row.created_at)).toISOString(),
+    updatedAt: new Date(String(row.updated_at)).toISOString()
+  };
+}
+async function updateIncidentStatus(id, status) {
+  const db2 = requireDb();
+  const result = await db2.query(
+    `UPDATE security_incidents
+     SET status = $2, updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id, status]
+  );
+  return result.rows.length === 0 ? null : mapIncident2(result.rows[0]);
+}
+
+// server/security/incidentRoutes.ts
+var router2 = Router2();
+var statusSchema = z2.object({
+  status: z2.enum(["open", "investigating", "resolved"])
+});
+router2.patch("/incidents/:id/status", async (req, res, next) => {
+  try {
+    const parsed = statusSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid incident status"
+      });
+    }
+    const incident = await updateIncidentStatus(req.params.id, parsed.data.status);
+    if (!incident) {
+      return res.status(404).json({
+        success: false,
+        error: "Incident not found"
+      });
+    }
+    return res.json({ success: true, data: incident });
+  } catch (error) {
+    next(error);
+  }
+});
+var incidentRoutes_default = router2;
 
 // server/index.ts
 var app = express();
@@ -553,6 +745,7 @@ app.get("/api/health", async (_req, res) => {
   }
 });
 app.use("/api/security", routes_default);
+app.use("/api/security", incidentRoutes_default);
 var port = Number(process.env.PORT ?? 3001);
 async function start() {
   await initializeSecurityDatabase();
