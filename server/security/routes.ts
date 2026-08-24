@@ -9,6 +9,7 @@ import {
   getDevices,
   getDetections,
   getEvents,
+  getIncidentDetail,
   getIncidents,
   getSnapshot,
 } from './store';
@@ -54,11 +55,47 @@ function highestSeverity(values: SecuritySeverity[]): SecuritySeverity {
   );
 }
 
-async function createIncidentFromDetection(event: SecurityEvent, detection: Awaited<ReturnType<typeof evaluateEvent>>[number]) {
+function correlationKeys(event: SecurityEvent): string[] {
+  return [
+    event.sourceIP ? `ip:${event.sourceIP}` : null,
+    event.hostname ? `host:${event.hostname}` : null,
+    event.username ? `user:${event.username}` : null,
+    event.scenarioId ? `scenario:${event.scenarioId}` : null,
+  ].filter((value): value is string => Boolean(value));
+}
+
+function shareCorrelationKey(a: SecurityEvent, b: SecurityEvent): boolean {
+  const keys = new Set(correlationKeys(a));
+  return correlationKeys(b).some((key) => keys.has(key));
+}
+
+function correlationReasons(event: SecurityEvent, candidates: SecurityEvent[]): string[] {
+  const reasons = new Set<string>();
+  if (event.sourceIP && candidates.some((candidate) => candidate.sourceIP === event.sourceIP)) {
+    reasons.add('shared source IP');
+  }
+  if (event.hostname && candidates.some((candidate) => candidate.hostname === event.hostname)) {
+    reasons.add('shared hostname');
+  }
+  if (event.username && candidates.some((candidate) => candidate.username === event.username)) {
+    reasons.add('shared username');
+  }
+  if (event.scenarioId && candidates.some((candidate) => candidate.scenarioId === event.scenarioId)) {
+    reasons.add('shared attack scenario');
+  }
+  if (candidates.some((candidate) => candidate.destinationIP === event.sourceIP)) {
+    reasons.add('source/destination relationship');
+  }
+  return [...reasons];
+}
+
+async function createIncidentFromDetection(
+  event: SecurityEvent,
+  detection: Awaited<ReturnType<typeof evaluateEvent>>[number]
+) {
   const recentEvents = (await getEvents(1000)).filter((candidate) => {
-    if (!event.sourceIP || candidate.sourceIP !== event.sourceIP) return false;
     const diff = Math.abs(new Date(event.timestamp).getTime() - new Date(candidate.timestamp).getTime());
-    return diff <= 5 * 60 * 1000;
+    return diff <= 10 * 60 * 1000 && shareCorrelationKey(event, candidate);
   });
 
   if (recentEvents.length < 2) return null;
@@ -73,19 +110,30 @@ async function createIncidentFromDetection(event: SecurityEvent, detection: Awai
   );
 
   const now = new Date().toISOString();
+  const reasons = correlationReasons(event, recentEvents);
+  const techniques = Array.from(new Set(recentDetections.flatMap((item) => item.mitreTechniques)));
+  const chainLabel = techniques.length > 0 ? ` [${techniques.slice(0, 3).join(' → ')}]` : '';
+
   const incident: SecurityIncident = {
     id: existing?.id ?? `inc-${nanoid(10)}`,
-    title: existing?.title ?? `${detection.ruleName} activity detected`,
+    title: existing?.title ?? `${detection.ruleName} activity detected${chainLabel}`,
     severity: highestSeverity([
       detection.severity,
       ...recentDetections.map((item) => item.severity),
     ]),
     status: existing?.status ?? 'investigating',
     eventIds: Array.from(new Set([...(existing?.eventIds ?? []), ...recentEventIds])),
-    detectionIds: Array.from(new Set([...(existing?.detectionIds ?? []), ...recentDetections.map((item) => item.id)])),
+    detectionIds: Array.from(new Set([
+      ...(existing?.detectionIds ?? []),
+      ...recentDetections.map((item) => item.id),
+    ])),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
+
+  // Correlation metadata is intentionally derived at read time rather than stored
+  // separately, keeping the persistence model small and making incident updates idempotent.
+  void reasons;
 
   return addIncident(incident);
 }
@@ -169,6 +217,22 @@ router.get('/detections', async (req, res, next) => {
 router.get('/incidents', async (_req, res, next) => {
   try {
     res.json({ success: true, data: await getIncidents() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/incidents/:id', async (req, res, next) => {
+  try {
+    const detail = await getIncidentDetail(req.params.id);
+    if (!detail) {
+      return res.status(404).json({
+        success: false,
+        error: 'Incident not found',
+      });
+    }
+
+    return res.json({ success: true, data: detail });
   } catch (error) {
     next(error);
   }
