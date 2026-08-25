@@ -51,12 +51,9 @@ export async function initializeSecurityDatabase(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    CREATE INDEX IF NOT EXISTS idx_security_events_timestamp
-      ON security_events (timestamp DESC);
-    CREATE INDEX IF NOT EXISTS idx_security_events_source_ip
-      ON security_events (source_ip);
-    CREATE INDEX IF NOT EXISTS idx_security_events_hostname
-      ON security_events (hostname);
+    CREATE INDEX IF NOT EXISTS idx_security_events_timestamp ON security_events (timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_security_events_source_ip ON security_events (source_ip);
+    CREATE INDEX IF NOT EXISTS idx_security_events_hostname ON security_events (hostname);
 
     CREATE TABLE IF NOT EXISTS security_detections (
       id TEXT PRIMARY KEY,
@@ -74,12 +71,9 @@ export async function initializeSecurityDatabase(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    CREATE INDEX IF NOT EXISTS idx_security_detections_timestamp
-      ON security_detections (timestamp DESC);
-    CREATE INDEX IF NOT EXISTS idx_security_detections_event_id
-      ON security_detections (event_id);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_security_detections_rule_event
-      ON security_detections (rule_id, event_id);
+    CREATE INDEX IF NOT EXISTS idx_security_detections_timestamp ON security_detections (timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_security_detections_event_id ON security_detections (event_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_security_detections_rule_event ON security_detections (rule_id, event_id);
 
     CREATE TABLE IF NOT EXISTS security_incidents (
       id TEXT PRIMARY KEY,
@@ -88,12 +82,40 @@ export async function initializeSecurityDatabase(): Promise<void> {
       status TEXT NOT NULL DEFAULT 'open',
       event_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
       detection_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+      assignee TEXT,
+      resolved_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    CREATE INDEX IF NOT EXISTS idx_security_incidents_updated_at
-      ON security_incidents (updated_at DESC);
+    ALTER TABLE security_incidents ADD COLUMN IF NOT EXISTS assignee TEXT;
+    ALTER TABLE security_incidents ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+
+    CREATE INDEX IF NOT EXISTS idx_security_incidents_updated_at ON security_incidents (updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_security_incidents_status ON security_incidents (status);
+
+    CREATE TABLE IF NOT EXISTS security_incident_notes (
+      id BIGSERIAL PRIMARY KEY,
+      incident_id TEXT NOT NULL REFERENCES security_incidents(id) ON DELETE CASCADE,
+      author TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_security_incident_notes_incident
+      ON security_incident_notes (incident_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS security_incident_activity (
+      id BIGSERIAL PRIMARY KEY,
+      incident_id TEXT NOT NULL REFERENCES security_incidents(id) ON DELETE CASCADE,
+      action TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_security_incident_activity_incident
+      ON security_incident_activity (incident_id, created_at DESC);
   `);
 
   console.log('[J.A.R.V.I.S.] Security database initialized.');
