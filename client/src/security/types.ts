@@ -12,6 +12,7 @@ export interface SecurityEvent {
 }
 export interface DetectionRule { id: string; name: string; description: string; severity: SecuritySeverity; mitreTechniques: string[]; match: (event: SecurityEvent) => boolean; }
 export interface DetectionResult { id: string; ruleId: string; ruleName: string; eventId: string; timestamp: string; severity: SecuritySeverity; title: string; description: string; confidence: number; mitreTechniques: string[]; sourceIP?: string; destinationIP?: string; }
+export type SecurityDetection = DetectionResult;
 export interface AttackScenarioEventTemplate { offsetMs: number; event: Omit<SecurityEvent, 'id' | 'timestamp' | 'scenarioId'>; }
 export interface AttackScenario { id: string; name: string; description: string; category: string; mitreTechniques: string[]; events: AttackScenarioEventTemplate[]; }
 export interface ScenarioRun { id: string; scenarioId: string; startedAt: string; completedAt?: string; eventIds: string[]; }
