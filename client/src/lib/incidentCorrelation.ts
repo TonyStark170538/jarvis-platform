@@ -84,7 +84,7 @@ export function correlateSecurityEvents(events: SecurityEvent[]): CorrelatedEven
     }
   }
 
-  return Array.from(result.values());
+  return [...result.values()];
 }
 
 /** Build incident threads directly from SecurityEvent telemetry. */

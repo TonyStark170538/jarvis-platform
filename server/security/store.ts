@@ -3,6 +3,9 @@ import type {
   SecurityDetection,
   SecurityEvent,
   SecurityIncident,
+  SecurityIncidentActivity,
+  SecurityIncidentDetail,
+  SecurityIncidentNote,
   SecuritySnapshot,
 } from './types';
 
@@ -12,152 +15,118 @@ function parseJson<T>(value: unknown, fallback: T): T {
 
 function mapEvent(row: Record<string, unknown>): SecurityEvent {
   return {
-    id: String(row.id),
-    timestamp: new Date(String(row.timestamp)).toISOString(),
-    type: row.type as SecurityEvent['type'],
-    source: row.source as SecurityEvent['source'],
-    sourceSystem: row.source_system as string | undefined,
-    title: String(row.title),
-    description: String(row.description),
-    severity: row.severity as SecurityEvent['severity'],
-    sourceIP: row.source_ip as string | undefined,
-    destinationIP: row.destination_ip as string | undefined,
-    sourcePort: row.source_port as number | undefined,
-    destinationPort: row.destination_port as number | undefined,
-    protocol: row.protocol as string | undefined,
-    hostname: row.hostname as string | undefined,
-    username: row.username as string | undefined,
-    processName: row.process_name as string | undefined,
-    filePath: row.file_path as string | undefined,
-    mitreTechniques: parseJson(row.mitre_techniques, []),
-    scenarioId: row.scenario_id as string | undefined,
-    metadata: parseJson(row.metadata, {}),
+    id: String(row.id), timestamp: new Date(String(row.timestamp)).toISOString(), type: row.type as SecurityEvent['type'],
+    source: row.source as SecurityEvent['source'], sourceSystem: row.source_system as string | undefined,
+    title: String(row.title), description: String(row.description), severity: row.severity as SecurityEvent['severity'],
+    sourceIP: row.source_ip as string | undefined, destinationIP: row.destination_ip as string | undefined,
+    sourcePort: row.source_port as number | undefined, destinationPort: row.destination_port as number | undefined,
+    protocol: row.protocol as string | undefined, hostname: row.hostname as string | undefined,
+    username: row.username as string | undefined, processName: row.process_name as string | undefined,
+    filePath: row.file_path as string | undefined, mitreTechniques: parseJson(row.mitre_techniques, []),
+    scenarioId: row.scenario_id as string | undefined, metadata: parseJson(row.metadata, {}),
   };
 }
 
 function mapDetection(row: Record<string, unknown>): SecurityDetection {
   return {
-    id: String(row.id),
-    ruleId: String(row.rule_id),
-    ruleName: String(row.rule_name),
-    eventId: String(row.event_id),
-    timestamp: new Date(String(row.timestamp)).toISOString(),
-    severity: row.severity as SecurityDetection['severity'],
-    title: String(row.title),
-    description: String(row.description),
-    confidence: Number(row.confidence),
-    mitreTechniques: parseJson(row.mitre_techniques, []),
-    sourceIP: row.source_ip as string | undefined,
+    id: String(row.id), ruleId: String(row.rule_id), ruleName: String(row.rule_name), eventId: String(row.event_id),
+    timestamp: new Date(String(row.timestamp)).toISOString(), severity: row.severity as SecurityDetection['severity'],
+    title: String(row.title), description: String(row.description), confidence: Number(row.confidence),
+    mitreTechniques: parseJson(row.mitre_techniques, []), sourceIP: row.source_ip as string | undefined,
     destinationIP: row.destination_ip as string | undefined,
   };
 }
 
 function mapIncident(row: Record<string, unknown>): SecurityIncident {
   return {
-    id: String(row.id),
-    title: String(row.title),
-    severity: row.severity as SecurityIncident['severity'],
-    status: row.status as SecurityIncident['status'],
-    eventIds: parseJson(row.event_ids, []),
-    detectionIds: parseJson(row.detection_ids, []),
-    createdAt: new Date(String(row.created_at)).toISOString(),
-    updatedAt: new Date(String(row.updated_at)).toISOString(),
+    id: String(row.id), title: String(row.title), severity: row.severity as SecurityIncident['severity'],
+    status: row.status as SecurityIncident['status'], eventIds: parseJson(row.event_ids, []),
+    detectionIds: parseJson(row.detection_ids, []), assignee: row.assignee as string | undefined,
+    resolvedAt: row.resolved_at ? new Date(String(row.resolved_at)).toISOString() : undefined,
+    createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(),
+  };
+}
+
+function mapNote(row: Record<string, unknown>): SecurityIncidentNote {
+  return {
+    id: String(row.id), incidentId: String(row.incident_id), author: String(row.author),
+    body: String(row.body), createdAt: new Date(String(row.created_at)).toISOString(),
+  };
+}
+
+function mapActivity(row: Record<string, unknown>): SecurityIncidentActivity {
+  return {
+    id: String(row.id), incidentId: String(row.incident_id), action: String(row.action),
+    actor: String(row.actor), metadata: parseJson(row.metadata, {}), createdAt: new Date(String(row.created_at)).toISOString(),
   };
 }
 
 export async function addEvent(event: SecurityEvent): Promise<SecurityEvent> {
   const db = requireDb();
-
   await db.query(
-    `INSERT INTO security_events (
-      id, timestamp, type, source, source_system, title, description, severity,
-      source_ip, destination_ip, source_port, destination_port, protocol,
-      hostname, username, process_name, file_path, mitre_techniques,
-      scenario_id, metadata
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
-    ON CONFLICT (id) DO NOTHING`,
-    [
-      event.id,
-      event.timestamp,
-      event.type,
-      event.source,
-      event.sourceSystem ?? null,
-      event.title,
-      event.description,
-      event.severity,
-      event.sourceIP ?? null,
-      event.destinationIP ?? null,
-      event.sourcePort ?? null,
-      event.destinationPort ?? null,
-      event.protocol ?? null,
-      event.hostname ?? null,
-      event.username ?? null,
-      event.processName ?? null,
-      event.filePath ?? null,
-      JSON.stringify(event.mitreTechniques ?? []),
-      event.scenarioId ?? null,
-      JSON.stringify(event.metadata ?? {}),
-    ]
+    `INSERT INTO security_events (id, timestamp, type, source, source_system, title, description, severity,
+      source_ip, destination_ip, source_port, destination_port, protocol, hostname, username, process_name,
+      file_path, mitre_techniques, scenario_id, metadata)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+     ON CONFLICT (id) DO NOTHING`,
+    [event.id, event.timestamp, event.type, event.source, event.sourceSystem ?? null, event.title, event.description,
+      event.severity, event.sourceIP ?? null, event.destinationIP ?? null, event.sourcePort ?? null,
+      event.destinationPort ?? null, event.protocol ?? null, event.hostname ?? null, event.username ?? null,
+      event.processName ?? null, event.filePath ?? null, JSON.stringify(event.mitreTechniques ?? []),
+      event.scenarioId ?? null, JSON.stringify(event.metadata ?? {})]
   );
-
   return event;
 }
 
 export async function addDetection(detection: SecurityDetection): Promise<SecurityDetection> {
   const db = requireDb();
-
   await db.query(
-    `INSERT INTO security_detections (
-      id, rule_id, rule_name, event_id, timestamp, severity, title,
-      description, confidence, mitre_techniques, source_ip, destination_ip
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-    ON CONFLICT (id) DO NOTHING`,
-    [
-      detection.id,
-      detection.ruleId,
-      detection.ruleName,
-      detection.eventId,
-      detection.timestamp,
-      detection.severity,
-      detection.title,
-      detection.description,
-      detection.confidence,
-      JSON.stringify(detection.mitreTechniques),
-      detection.sourceIP ?? null,
-      detection.destinationIP ?? null,
-    ]
+    `INSERT INTO security_detections (id, rule_id, rule_name, event_id, timestamp, severity, title,
+      description, confidence, mitre_techniques, source_ip, destination_ip)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING`,
+    [detection.id, detection.ruleId, detection.ruleName, detection.eventId, detection.timestamp, detection.severity,
+      detection.title, detection.description, detection.confidence, JSON.stringify(detection.mitreTechniques),
+      detection.sourceIP ?? null, detection.destinationIP ?? null]
   );
-
   return detection;
 }
 
 export async function addIncident(incident: SecurityIncident): Promise<SecurityIncident> {
   const db = requireDb();
-
   await db.query(
-    `INSERT INTO security_incidents (
-      id, title, severity, status, event_ids, detection_ids, created_at, updated_at
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-    ON CONFLICT (id) DO UPDATE SET
-      title = EXCLUDED.title,
-      severity = EXCLUDED.severity,
-      status = EXCLUDED.status,
-      event_ids = EXCLUDED.event_ids,
-      detection_ids = EXCLUDED.detection_ids,
-      updated_at = EXCLUDED.updated_at`,
-    [
-      incident.id,
-      incident.title,
-      incident.severity,
-      incident.status,
-      JSON.stringify(incident.eventIds),
-      JSON.stringify(incident.detectionIds),
-      incident.createdAt,
-      incident.updatedAt,
-    ]
+    `INSERT INTO security_incidents (id, title, severity, status, event_ids, detection_ids, assignee, resolved_at, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, severity=EXCLUDED.severity, status=EXCLUDED.status,
+       event_ids=EXCLUDED.event_ids, detection_ids=EXCLUDED.detection_ids, assignee=EXCLUDED.assignee,
+       resolved_at=EXCLUDED.resolved_at, updated_at=EXCLUDED.updated_at`,
+    [incident.id, incident.title, incident.severity, incident.status, JSON.stringify(incident.eventIds),
+      JSON.stringify(incident.detectionIds), incident.assignee ?? null, incident.resolvedAt ?? null,
+      incident.createdAt, incident.updatedAt]
   );
-
   return incident;
+}
+
+export async function addIncidentNote(incidentId: string, author: string, body: string): Promise<SecurityIncidentNote> {
+  const db = requireDb();
+  const result = await db.query(
+    `INSERT INTO security_incident_notes (incident_id, author, body) VALUES ($1,$2,$3) RETURNING *`,
+    [incidentId, author, body]
+  );
+  return mapNote(result.rows[0]);
+}
+
+export async function addIncidentActivity(
+  incidentId: string,
+  action: string,
+  actor: string,
+  metadata: Record<string, unknown> = {}
+): Promise<SecurityIncidentActivity> {
+  const db = requireDb();
+  const result = await db.query(
+    `INSERT INTO security_incident_activity (incident_id, action, actor, metadata) VALUES ($1,$2,$3,$4) RETURNING *`,
+    [incidentId, action, actor, JSON.stringify(metadata)]
+  );
+  return mapActivity(result.rows[0]);
 }
 
 export async function getEvents(limit = 100): Promise<SecurityEvent[]> {
@@ -181,27 +150,77 @@ export async function getIncidents(limit = 100): Promise<SecurityIncident[]> {
   return result.rows.map(mapIncident);
 }
 
+export async function getIncidentById(id: string): Promise<SecurityIncident | null> {
+  const db = requireDb();
+  const result = await db.query('SELECT * FROM security_incidents WHERE id = $1 LIMIT 1', [id]);
+  return result.rows.length === 0 ? null : mapIncident(result.rows[0]);
+}
+
+export async function getIncidentNotes(id: string): Promise<SecurityIncidentNote[]> {
+  const db = requireDb();
+  const result = await db.query('SELECT * FROM security_incident_notes WHERE incident_id = $1 ORDER BY created_at DESC', [id]);
+  return result.rows.map(mapNote);
+}
+
+export async function getIncidentActivity(id: string): Promise<SecurityIncidentActivity[]> {
+  const db = requireDb();
+  const result = await db.query('SELECT * FROM security_incident_activity WHERE incident_id = $1 ORDER BY created_at DESC', [id]);
+  return result.rows.map(mapActivity);
+}
+
+export async function getIncidentDetail(id: string): Promise<SecurityIncidentDetail | null> {
+  const db = requireDb();
+  const incidentResult = await db.query('SELECT * FROM security_incidents WHERE id = $1 LIMIT 1', [id]);
+  if (incidentResult.rows.length === 0) return null;
+
+  const incident = mapIncident(incidentResult.rows[0]);
+  const [eventsResult, detectionsResult, notesResult, activityResult] = await Promise.all([
+    db.query('SELECT * FROM security_events WHERE id = ANY($1::text[]) ORDER BY timestamp ASC', [incident.eventIds]),
+    db.query('SELECT * FROM security_detections WHERE id = ANY($1::text[]) ORDER BY timestamp ASC', [incident.detectionIds]),
+    db.query('SELECT * FROM security_incident_notes WHERE incident_id = $1 ORDER BY created_at DESC', [id]),
+    db.query('SELECT * FROM security_incident_activity WHERE incident_id = $1 ORDER BY created_at DESC', [id]),
+  ]);
+
+  const events = eventsResult.rows.map(mapEvent);
+  const detections = detectionsResult.rows.map(mapDetection);
+  const notes = notesResult.rows.map(mapNote);
+  const activity = activityResult.rows.map(mapActivity);
+  const techniqueSet = new Set<string>();
+  const timeline: SecurityIncidentDetail['timeline'] = [];
+
+  for (const event of events) {
+    for (const technique of event.mitreTechniques ?? []) techniqueSet.add(technique);
+    timeline.push({ timestamp: event.timestamp, kind: 'event', id: event.id, title: event.title,
+      severity: event.severity, mitreTechniques: event.mitreTechniques ?? [] });
+  }
+  for (const detection of detections) {
+    for (const technique of detection.mitreTechniques) techniqueSet.add(technique);
+    timeline.push({ timestamp: detection.timestamp, kind: 'detection', id: detection.id, title: detection.title,
+      severity: detection.severity, mitreTechniques: detection.mitreTechniques });
+  }
+  timeline.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+  const confidence = detections.length === 0 ? 0 : Math.min(1,
+    detections.reduce((sum, detection) => sum + detection.confidence, 0) / detections.length);
+  const reasons = [`${events.length} related telemetry events`, `${detections.length} detection${detections.length === 1 ? '' : 's'} matched`];
+  const sourceIPs = new Set(events.map((event) => event.sourceIP).filter(Boolean));
+  const hostnames = new Set(events.map((event) => event.hostname).filter(Boolean));
+  const usernames = new Set(events.map((event) => event.username).filter(Boolean));
+  if (sourceIPs.size === 1) reasons.push('shared source IP across the event chain');
+  if (hostnames.size === 1) reasons.push('shared hostname across the event chain');
+  if (usernames.size === 1) reasons.push('shared username across the event chain');
+
+  return { incident, events, detections, notes, activity, attackTechniques: [...techniqueSet], timeline,
+    correlation: { eventCount: events.length, detectionCount: detections.length, confidence, reasons } };
+}
+
 export async function getDevices(): Promise<string[]> {
   const db = requireDb();
-  const result = await db.query(
-    'SELECT DISTINCT hostname FROM security_events WHERE hostname IS NOT NULL ORDER BY hostname'
-  );
+  const result = await db.query('SELECT DISTINCT hostname FROM security_events WHERE hostname IS NOT NULL ORDER BY hostname');
   return result.rows.map((row) => String(row.hostname));
 }
 
 export async function getSnapshot(): Promise<SecuritySnapshot> {
-  const [events, detections, incidents, devices] = await Promise.all([
-    getEvents(),
-    getDetections(),
-    getIncidents(),
-    getDevices(),
-  ]);
-
-  return {
-    events,
-    detections,
-    incidents,
-    devices,
-    updatedAt: new Date().toISOString(),
-  };
+  const [events, detections, incidents, devices] = await Promise.all([getEvents(), getDetections(), getIncidents(), getDevices()]);
+  return { events, detections, incidents, devices, updatedAt: new Date().toISOString() };
 }

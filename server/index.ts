@@ -2,6 +2,7 @@ import cors from 'cors';
 import express from 'express';
 import { createServer } from 'http';
 import securityRouter from './security/routes';
+import incidentRouter from './security/incidentRoutes';
 import { db, initializeSecurityDatabase } from './security/db';
 
 const app = express();
@@ -38,6 +39,7 @@ app.get('/api/health', async (_req, res) => {
 });
 
 app.use('/api/security', securityRouter);
+app.use('/api/security', incidentRouter);
 
 const port = Number(process.env.PORT ?? 3001);
 

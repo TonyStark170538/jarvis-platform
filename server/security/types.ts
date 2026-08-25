@@ -1,27 +1,13 @@
 export type SecuritySeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
+export type SecurityIncidentStatus = 'open' | 'investigating' | 'resolved';
 
 export type SecurityEventType =
-  | 'authentication'
-  | 'network'
-  | 'process'
-  | 'file'
-  | 'malware'
-  | 'privilege'
-  | 'exfiltration'
-  | 'dns'
-  | 'web'
-  | 'system'
-  | 'detection';
+  | 'authentication' | 'network' | 'process' | 'file' | 'malware'
+  | 'privilege' | 'exfiltration' | 'dns' | 'web' | 'system' | 'detection';
 
 export type SecurityEventSource =
-  | 'simulation'
-  | 'suricata'
-  | 'zeek'
-  | 'splunk'
-  | 'endpoint'
-  | 'firewall'
-  | 'identity'
-  | 'manual';
+  | 'simulation' | 'suricata' | 'zeek' | 'splunk' | 'endpoint'
+  | 'firewall' | 'identity' | 'manual';
 
 export interface SecurityEvent {
   id: string;
@@ -65,11 +51,53 @@ export interface SecurityIncident {
   id: string;
   title: string;
   severity: SecuritySeverity;
-  status: 'open' | 'investigating' | 'resolved';
+  status: SecurityIncidentStatus;
   eventIds: string[];
   detectionIds: string[];
+  assignee?: string;
+  resolvedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SecurityIncidentNote {
+  id: string;
+  incidentId: string;
+  author: string;
+  body: string;
+  createdAt: string;
+}
+
+export interface SecurityIncidentActivity {
+  id: string;
+  incidentId: string;
+  action: string;
+  actor: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface SecurityIncidentDetail {
+  incident: SecurityIncident;
+  events: SecurityEvent[];
+  detections: SecurityDetection[];
+  notes: SecurityIncidentNote[];
+  activity: SecurityIncidentActivity[];
+  attackTechniques: string[];
+  timeline: Array<{
+    timestamp: string;
+    kind: 'event' | 'detection';
+    id: string;
+    title: string;
+    severity: SecuritySeverity;
+    mitreTechniques: string[];
+  }>;
+  correlation: {
+    eventCount: number;
+    detectionCount: number;
+    confidence: number;
+    reasons: string[];
+  };
 }
 
 export interface SecuritySnapshot {
