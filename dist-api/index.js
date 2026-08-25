@@ -166,12 +166,9 @@ async function initializeSecurityDatabase() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    CREATE INDEX IF NOT EXISTS idx_security_events_timestamp
-      ON security_events (timestamp DESC);
-    CREATE INDEX IF NOT EXISTS idx_security_events_source_ip
-      ON security_events (source_ip);
-    CREATE INDEX IF NOT EXISTS idx_security_events_hostname
-      ON security_events (hostname);
+    CREATE INDEX IF NOT EXISTS idx_security_events_timestamp ON security_events (timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_security_events_source_ip ON security_events (source_ip);
+    CREATE INDEX IF NOT EXISTS idx_security_events_hostname ON security_events (hostname);
 
     CREATE TABLE IF NOT EXISTS security_detections (
       id TEXT PRIMARY KEY,
@@ -189,12 +186,9 @@ async function initializeSecurityDatabase() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    CREATE INDEX IF NOT EXISTS idx_security_detections_timestamp
-      ON security_detections (timestamp DESC);
-    CREATE INDEX IF NOT EXISTS idx_security_detections_event_id
-      ON security_detections (event_id);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_security_detections_rule_event
-      ON security_detections (rule_id, event_id);
+    CREATE INDEX IF NOT EXISTS idx_security_detections_timestamp ON security_detections (timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_security_detections_event_id ON security_detections (event_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_security_detections_rule_event ON security_detections (rule_id, event_id);
 
     CREATE TABLE IF NOT EXISTS security_incidents (
       id TEXT PRIMARY KEY,
@@ -203,12 +197,40 @@ async function initializeSecurityDatabase() {
       status TEXT NOT NULL DEFAULT 'open',
       event_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
       detection_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+      assignee TEXT,
+      resolved_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    CREATE INDEX IF NOT EXISTS idx_security_incidents_updated_at
-      ON security_incidents (updated_at DESC);
+    ALTER TABLE security_incidents ADD COLUMN IF NOT EXISTS assignee TEXT;
+    ALTER TABLE security_incidents ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+
+    CREATE INDEX IF NOT EXISTS idx_security_incidents_updated_at ON security_incidents (updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_security_incidents_status ON security_incidents (status);
+
+    CREATE TABLE IF NOT EXISTS security_incident_notes (
+      id BIGSERIAL PRIMARY KEY,
+      incident_id TEXT NOT NULL REFERENCES security_incidents(id) ON DELETE CASCADE,
+      author TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_security_incident_notes_incident
+      ON security_incident_notes (incident_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS security_incident_activity (
+      id BIGSERIAL PRIMARY KEY,
+      incident_id TEXT NOT NULL REFERENCES security_incidents(id) ON DELETE CASCADE,
+      action TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_security_incident_activity_incident
+      ON security_incident_activity (incident_id, created_at DESC);
   `);
   console.log("[J.A.R.V.I.S.] Security database initialized.");
 }
@@ -265,20 +287,39 @@ function mapIncident(row) {
     status: row.status,
     eventIds: parseJson(row.event_ids, []),
     detectionIds: parseJson(row.detection_ids, []),
+    assignee: row.assignee,
+    resolvedAt: row.resolved_at ? new Date(String(row.resolved_at)).toISOString() : void 0,
     createdAt: new Date(String(row.created_at)).toISOString(),
     updatedAt: new Date(String(row.updated_at)).toISOString()
+  };
+}
+function mapNote(row) {
+  return {
+    id: String(row.id),
+    incidentId: String(row.incident_id),
+    author: String(row.author),
+    body: String(row.body),
+    createdAt: new Date(String(row.created_at)).toISOString()
+  };
+}
+function mapActivity(row) {
+  return {
+    id: String(row.id),
+    incidentId: String(row.incident_id),
+    action: String(row.action),
+    actor: String(row.actor),
+    metadata: parseJson(row.metadata, {}),
+    createdAt: new Date(String(row.created_at)).toISOString()
   };
 }
 async function addEvent(event) {
   const db2 = requireDb();
   await db2.query(
-    `INSERT INTO security_events (
-      id, timestamp, type, source, source_system, title, description, severity,
-      source_ip, destination_ip, source_port, destination_port, protocol,
-      hostname, username, process_name, file_path, mitre_techniques,
-      scenario_id, metadata
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
-    ON CONFLICT (id) DO NOTHING`,
+    `INSERT INTO security_events (id, timestamp, type, source, source_system, title, description, severity,
+      source_ip, destination_ip, source_port, destination_port, protocol, hostname, username, process_name,
+      file_path, mitre_techniques, scenario_id, metadata)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+     ON CONFLICT (id) DO NOTHING`,
     [
       event.id,
       event.timestamp,
@@ -307,11 +348,9 @@ async function addEvent(event) {
 async function addDetection(detection) {
   const db2 = requireDb();
   await db2.query(
-    `INSERT INTO security_detections (
-      id, rule_id, rule_name, event_id, timestamp, severity, title,
-      description, confidence, mitre_techniques, source_ip, destination_ip
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-    ON CONFLICT (id) DO NOTHING`,
+    `INSERT INTO security_detections (id, rule_id, rule_name, event_id, timestamp, severity, title,
+      description, confidence, mitre_techniques, source_ip, destination_ip)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING`,
     [
       detection.id,
       detection.ruleId,
@@ -332,16 +371,11 @@ async function addDetection(detection) {
 async function addIncident(incident) {
   const db2 = requireDb();
   await db2.query(
-    `INSERT INTO security_incidents (
-      id, title, severity, status, event_ids, detection_ids, created_at, updated_at
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-    ON CONFLICT (id) DO UPDATE SET
-      title = EXCLUDED.title,
-      severity = EXCLUDED.severity,
-      status = EXCLUDED.status,
-      event_ids = EXCLUDED.event_ids,
-      detection_ids = EXCLUDED.detection_ids,
-      updated_at = EXCLUDED.updated_at`,
+    `INSERT INTO security_incidents (id, title, severity, status, event_ids, detection_ids, assignee, resolved_at, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, severity=EXCLUDED.severity, status=EXCLUDED.status,
+       event_ids=EXCLUDED.event_ids, detection_ids=EXCLUDED.detection_ids, assignee=EXCLUDED.assignee,
+       resolved_at=EXCLUDED.resolved_at, updated_at=EXCLUDED.updated_at`,
     [
       incident.id,
       incident.title,
@@ -349,11 +383,29 @@ async function addIncident(incident) {
       incident.status,
       JSON.stringify(incident.eventIds),
       JSON.stringify(incident.detectionIds),
+      incident.assignee ?? null,
+      incident.resolvedAt ?? null,
       incident.createdAt,
       incident.updatedAt
     ]
   );
   return incident;
+}
+async function addIncidentNote(incidentId, author, body) {
+  const db2 = requireDb();
+  const result = await db2.query(
+    `INSERT INTO security_incident_notes (incident_id, author, body) VALUES ($1,$2,$3) RETURNING *`,
+    [incidentId, author, body]
+  );
+  return mapNote(result.rows[0]);
+}
+async function addIncidentActivity(incidentId, action, actor2, metadata = {}) {
+  const db2 = requireDb();
+  const result = await db2.query(
+    `INSERT INTO security_incident_activity (incident_id, action, actor, metadata) VALUES ($1,$2,$3,$4) RETURNING *`,
+    [incidentId, action, actor2, JSON.stringify(metadata)]
+  );
+  return mapActivity(result.rows[0]);
 }
 async function getEvents(limit = 100) {
   const db2 = requireDb();
@@ -373,17 +425,36 @@ async function getIncidents(limit = 100) {
   const result = await db2.query("SELECT * FROM security_incidents ORDER BY updated_at DESC LIMIT $1", [safeLimit]);
   return result.rows.map(mapIncident);
 }
+async function getIncidentById(id) {
+  const db2 = requireDb();
+  const result = await db2.query("SELECT * FROM security_incidents WHERE id = $1 LIMIT 1", [id]);
+  return result.rows.length === 0 ? null : mapIncident(result.rows[0]);
+}
+async function getIncidentNotes(id) {
+  const db2 = requireDb();
+  const result = await db2.query("SELECT * FROM security_incident_notes WHERE incident_id = $1 ORDER BY created_at DESC", [id]);
+  return result.rows.map(mapNote);
+}
+async function getIncidentActivity(id) {
+  const db2 = requireDb();
+  const result = await db2.query("SELECT * FROM security_incident_activity WHERE incident_id = $1 ORDER BY created_at DESC", [id]);
+  return result.rows.map(mapActivity);
+}
 async function getIncidentDetail(id) {
   const db2 = requireDb();
   const incidentResult = await db2.query("SELECT * FROM security_incidents WHERE id = $1 LIMIT 1", [id]);
   if (incidentResult.rows.length === 0) return null;
   const incident = mapIncident(incidentResult.rows[0]);
-  const [eventsResult, detectionsResult] = await Promise.all([
+  const [eventsResult, detectionsResult, notesResult, activityResult] = await Promise.all([
     db2.query("SELECT * FROM security_events WHERE id = ANY($1::text[]) ORDER BY timestamp ASC", [incident.eventIds]),
-    db2.query("SELECT * FROM security_detections WHERE id = ANY($1::text[]) ORDER BY timestamp ASC", [incident.detectionIds])
+    db2.query("SELECT * FROM security_detections WHERE id = ANY($1::text[]) ORDER BY timestamp ASC", [incident.detectionIds]),
+    db2.query("SELECT * FROM security_incident_notes WHERE incident_id = $1 ORDER BY created_at DESC", [id]),
+    db2.query("SELECT * FROM security_incident_activity WHERE incident_id = $1 ORDER BY created_at DESC", [id])
   ]);
   const events = eventsResult.rows.map(mapEvent);
   const detections = detectionsResult.rows.map(mapDetection);
+  const notes = notesResult.rows.map(mapNote);
+  const activity = activityResult.rows.map(mapActivity);
   const techniqueSet = /* @__PURE__ */ new Set();
   const timeline = [];
   for (const event of events) {
@@ -409,11 +480,11 @@ async function getIncidentDetail(id) {
     });
   }
   timeline.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-  const confidence = detections.length === 0 ? 0 : Math.min(1, detections.reduce((sum, detection) => sum + detection.confidence, 0) / detections.length);
-  const reasons = [
-    `${events.length} related telemetry events`,
-    `${detections.length} detection${detections.length === 1 ? "" : "s"} matched`
-  ];
+  const confidence = detections.length === 0 ? 0 : Math.min(
+    1,
+    detections.reduce((sum, detection) => sum + detection.confidence, 0) / detections.length
+  );
+  const reasons = [`${events.length} related telemetry events`, `${detections.length} detection${detections.length === 1 ? "" : "s"} matched`];
   const sourceIPs = new Set(events.map((event) => event.sourceIP).filter(Boolean));
   const hostnames = new Set(events.map((event) => event.hostname).filter(Boolean));
   const usernames = new Set(events.map((event) => event.username).filter(Boolean));
@@ -424,37 +495,21 @@ async function getIncidentDetail(id) {
     incident,
     events,
     detections,
+    notes,
+    activity,
     attackTechniques: [...techniqueSet],
     timeline,
-    correlation: {
-      eventCount: events.length,
-      detectionCount: detections.length,
-      confidence,
-      reasons
-    }
+    correlation: { eventCount: events.length, detectionCount: detections.length, confidence, reasons }
   };
 }
 async function getDevices() {
   const db2 = requireDb();
-  const result = await db2.query(
-    "SELECT DISTINCT hostname FROM security_events WHERE hostname IS NOT NULL ORDER BY hostname"
-  );
+  const result = await db2.query("SELECT DISTINCT hostname FROM security_events WHERE hostname IS NOT NULL ORDER BY hostname");
   return result.rows.map((row) => String(row.hostname));
 }
 async function getSnapshot() {
-  const [events, detections, incidents, devices] = await Promise.all([
-    getEvents(),
-    getDetections(),
-    getIncidents(),
-    getDevices()
-  ]);
-  return {
-    events,
-    detections,
-    incidents,
-    devices,
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  };
+  const [events, detections, incidents, devices] = await Promise.all([getEvents(), getDetections(), getIncidents(), getDevices()]);
+  return { events, detections, incidents, devices, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
 }
 
 // server/security/routes.ts
@@ -481,92 +536,44 @@ var securityEventSchema = z.object({
   scenarioId: z.string().optional(),
   metadata: z.record(z.string(), z.unknown()).optional()
 });
-var severityRank = {
-  info: 0,
-  low: 1,
-  medium: 2,
-  high: 3,
-  critical: 4
-};
+var severityRank = { info: 0, low: 1, medium: 2, high: 3, critical: 4 };
 function highestSeverity(values) {
-  return values.reduce(
-    (highest, value) => severityRank[value] > severityRank[highest] ? value : highest,
-    "info"
-  );
+  return values.reduce((highest, value) => severityRank[value] > severityRank[highest] ? value : highest, "info");
 }
 function correlationKeys(event) {
-  return [
-    event.sourceIP ? `ip:${event.sourceIP}` : null,
-    event.hostname ? `host:${event.hostname}` : null,
-    event.username ? `user:${event.username}` : null,
-    event.scenarioId ? `scenario:${event.scenarioId}` : null
-  ].filter((value) => Boolean(value));
+  return [event.sourceIP ? `ip:${event.sourceIP}` : null, event.hostname ? `host:${event.hostname}` : null, event.username ? `user:${event.username}` : null, event.scenarioId ? `scenario:${event.scenarioId}` : null].filter((value) => Boolean(value));
 }
 function shareCorrelationKey(a, b) {
   const keys = new Set(correlationKeys(a));
   return correlationKeys(b).some((key) => keys.has(key));
 }
-function correlationReasons(event, candidates) {
-  const reasons = /* @__PURE__ */ new Set();
-  if (event.sourceIP && candidates.some((candidate) => candidate.sourceIP === event.sourceIP)) {
-    reasons.add("shared source IP");
-  }
-  if (event.hostname && candidates.some((candidate) => candidate.hostname === event.hostname)) {
-    reasons.add("shared hostname");
-  }
-  if (event.username && candidates.some((candidate) => candidate.username === event.username)) {
-    reasons.add("shared username");
-  }
-  if (event.scenarioId && candidates.some((candidate) => candidate.scenarioId === event.scenarioId)) {
-    reasons.add("shared attack scenario");
-  }
-  if (candidates.some((candidate) => candidate.destinationIP === event.sourceIP)) {
-    reasons.add("source/destination relationship");
-  }
-  return [...reasons];
-}
 async function createIncidentFromDetection(event, detection) {
-  const recentEvents = (await getEvents(1e3)).filter((candidate) => {
-    const diff = Math.abs(new Date(event.timestamp).getTime() - new Date(candidate.timestamp).getTime());
-    return diff <= 10 * 60 * 1e3 && shareCorrelationKey(event, candidate);
-  });
+  const recentEvents = (await getEvents(1e3)).filter((candidate) => Math.abs(new Date(event.timestamp).getTime() - new Date(candidate.timestamp).getTime()) <= 10 * 60 * 1e3 && shareCorrelationKey(event, candidate));
   if (recentEvents.length < 2) return null;
   const recentEventIds = recentEvents.map((item) => item.id);
   const recentDetections = (await getDetections(500)).filter((item) => recentEventIds.includes(item.eventId));
   if (recentDetections.length === 0) return null;
-  const existingIncidents = await getIncidents(500);
-  const existing = existingIncidents.find(
-    (incident2) => incident2.status !== "resolved" && incident2.eventIds.some((id) => recentEventIds.includes(id))
-  );
+  const existing = (await getIncidents(500)).find((incident2) => incident2.status !== "resolved" && incident2.eventIds.some((id) => recentEventIds.includes(id)));
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  const reasons = correlationReasons(event, recentEvents);
   const techniques = Array.from(new Set(recentDetections.flatMap((item) => item.mitreTechniques)));
   const chainLabel = techniques.length > 0 ? ` [${techniques.slice(0, 3).join(" \u2192 ")}]` : "";
   const incident = {
     id: existing?.id ?? `inc-${nanoid(10)}`,
     title: existing?.title ?? `${detection.ruleName} activity detected${chainLabel}`,
-    severity: highestSeverity([
-      detection.severity,
-      ...recentDetections.map((item) => item.severity)
-    ]),
+    severity: highestSeverity([detection.severity, ...recentDetections.map((item) => item.severity)]),
     status: existing?.status ?? "investigating",
     eventIds: Array.from(/* @__PURE__ */ new Set([...existing?.eventIds ?? [], ...recentEventIds])),
-    detectionIds: Array.from(/* @__PURE__ */ new Set([
-      ...existing?.detectionIds ?? [],
-      ...recentDetections.map((item) => item.id)
-    ])),
+    detectionIds: Array.from(/* @__PURE__ */ new Set([...existing?.detectionIds ?? [], ...recentDetections.map((item) => item.id)])),
+    assignee: existing?.assignee,
+    resolvedAt: existing?.resolvedAt,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now
   };
-  void reasons;
-  return addIncident(incident);
+  const persisted = await addIncident(incident);
+  if (!existing) await addIncidentActivity(persisted.id, "incident_created", "J.A.R.V.I.S.", { severity: persisted.severity, detectionId: detection.id });
+  return persisted;
 }
-router.get("/health", async (_req, res) => {
-  res.json({
-    success: true,
-    data: { service: "jarvis-security-api", status: "online" }
-  });
-});
+router.get("/health", async (_req, res) => res.json({ success: true, data: { service: "jarvis-security-api", status: "online" } }));
 router.get("/snapshot", async (_req, res, next) => {
   try {
     res.json({ success: true, data: await getSnapshot() });
@@ -586,34 +593,18 @@ router.get("/events", async (req, res, next) => {
 router.post("/events", async (req, res, next) => {
   try {
     const parsed = securityEventSchema.safeParse(req.body?.event ?? req.body);
-    if (!parsed.success) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid security event payload",
-        details: parsed.error.flatten()
-      });
-    }
+    if (!parsed.success) return res.status(400).json({ success: false, error: "Invalid security event payload", details: parsed.error.flatten() });
     const event = parsed.data;
     const history = await getEvents(1e3);
     await addEvent(event);
     const detections = evaluateEvent(event, history);
-    for (const detection of detections) {
-      await addDetection(detection);
-    }
+    for (const detection of detections) await addDetection(detection);
     const incidents = [];
     for (const detection of detections) {
       const incident = await createIncidentFromDetection(event, detection);
       if (incident) incidents.push(incident);
     }
-    return res.status(201).json({
-      success: true,
-      data: {
-        event,
-        detections,
-        incidents,
-        ingestionId: nanoid()
-      }
-    });
+    return res.status(201).json({ success: true, data: { event, detections, incidents, ingestionId: nanoid() } });
   } catch (error) {
     next(error);
   }
@@ -637,12 +628,7 @@ router.get("/incidents", async (_req, res, next) => {
 router.get("/incidents/:id", async (req, res, next) => {
   try {
     const detail = await getIncidentDetail(req.params.id);
-    if (!detail) {
-      return res.status(404).json({
-        success: false,
-        error: "Incident not found"
-      });
-    }
+    if (!detail) return res.status(404).json({ success: false, error: "Incident not found" });
     return res.json({ success: true, data: detail });
   } catch (error) {
     next(error);
@@ -670,44 +656,98 @@ function mapIncident2(row) {
     status: row.status,
     eventIds: row.event_ids ?? [],
     detectionIds: row.detection_ids ?? [],
+    assignee: row.assignee,
+    resolvedAt: row.resolved_at ? new Date(String(row.resolved_at)).toISOString() : void 0,
     createdAt: new Date(String(row.created_at)).toISOString(),
     updatedAt: new Date(String(row.updated_at)).toISOString()
   };
 }
-async function updateIncidentStatus(id, status) {
+async function updateIncidentStatus(id, status, actor2 = "SOC Analyst") {
   const db2 = requireDb();
   const result = await db2.query(
     `UPDATE security_incidents
-     SET status = $2, updated_at = NOW()
+     SET status = $2,
+         resolved_at = CASE WHEN $2 = 'resolved' THEN NOW() ELSE NULL END,
+         updated_at = NOW()
      WHERE id = $1
      RETURNING *`,
     [id, status]
   );
-  return result.rows.length === 0 ? null : mapIncident2(result.rows[0]);
+  if (result.rows.length === 0) return null;
+  const incident = mapIncident2(result.rows[0]);
+  await addIncidentActivity(id, `status_changed:${status}`, actor2, { status });
+  return incident;
+}
+async function updateIncidentAssignee(id, assignee, actor2 = "SOC Analyst") {
+  const db2 = requireDb();
+  const result = await db2.query(
+    `UPDATE security_incidents SET assignee = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
+    [id, assignee]
+  );
+  if (result.rows.length === 0) return null;
+  const incident = mapIncident2(result.rows[0]);
+  await addIncidentActivity(id, "assignee_changed", actor2, { assignee });
+  return incident;
 }
 
 // server/security/incidentRoutes.ts
 var router2 = Router2();
-var statusSchema = z2.object({
-  status: z2.enum(["open", "investigating", "resolved"])
-});
+var statusSchema = z2.object({ status: z2.enum(["open", "investigating", "resolved"]) });
+var assigneeSchema = z2.object({ assignee: z2.string().trim().min(1).max(120) });
+var noteSchema = z2.object({ body: z2.string().trim().min(1).max(5e3) });
+function actor(req) {
+  const header = req.header("x-jarvis-actor");
+  return header?.trim().slice(0, 120) || "SOC Analyst";
+}
+async function ensureIncident(id) {
+  return Boolean(await getIncidentById(id));
+}
 router2.patch("/incidents/:id/status", async (req, res, next) => {
   try {
     const parsed = statusSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid incident status"
-      });
-    }
-    const incident = await updateIncidentStatus(req.params.id, parsed.data.status);
-    if (!incident) {
-      return res.status(404).json({
-        success: false,
-        error: "Incident not found"
-      });
-    }
+    if (!parsed.success) return res.status(400).json({ success: false, error: "Invalid incident status" });
+    if (!await ensureIncident(req.params.id)) return res.status(404).json({ success: false, error: "Incident not found" });
+    const incident = await updateIncidentStatus(req.params.id, parsed.data.status, actor(req));
     return res.json({ success: true, data: incident });
+  } catch (error) {
+    next(error);
+  }
+});
+router2.patch("/incidents/:id/assignee", async (req, res, next) => {
+  try {
+    const parsed = assigneeSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: "Invalid assignee" });
+    if (!await ensureIncident(req.params.id)) return res.status(404).json({ success: false, error: "Incident not found" });
+    const incident = await updateIncidentAssignee(req.params.id, parsed.data.assignee, actor(req));
+    return res.json({ success: true, data: incident });
+  } catch (error) {
+    next(error);
+  }
+});
+router2.post("/incidents/:id/notes", async (req, res, next) => {
+  try {
+    const parsed = noteSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: "Note body is required" });
+    if (!await ensureIncident(req.params.id)) return res.status(404).json({ success: false, error: "Incident not found" });
+    const note = await addIncidentNote(req.params.id, actor(req), parsed.data.body);
+    await addIncidentActivity(req.params.id, "note_added", actor(req), { noteId: note.id });
+    return res.status(201).json({ success: true, data: note });
+  } catch (error) {
+    next(error);
+  }
+});
+router2.get("/incidents/:id/notes", async (req, res, next) => {
+  try {
+    if (!await ensureIncident(req.params.id)) return res.status(404).json({ success: false, error: "Incident not found" });
+    return res.json({ success: true, data: await getIncidentNotes(req.params.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+router2.get("/incidents/:id/activity", async (req, res, next) => {
+  try {
+    if (!await ensureIncident(req.params.id)) return res.status(404).json({ success: false, error: "Incident not found" });
+    return res.json({ success: true, data: await getIncidentActivity(req.params.id) });
   } catch (error) {
     next(error);
   }
