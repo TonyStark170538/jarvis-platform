@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import {
   BarChart3,
   Calendar,
@@ -17,14 +18,6 @@ import { securityStore } from '@/security/securityStore';
 import type { SecuritySeverity, SecurityStoreSnapshot } from '@/security/types';
 
 type Period = 7 | 30 | 90;
-
-const severityRank: Record<SecuritySeverity, number> = {
-  info: 0,
-  low: 1,
-  medium: 2,
-  high: 3,
-  critical: 4,
-};
 
 const severityClass: Record<SecuritySeverity, string> = {
   critical: 'bg-red-500/20 text-red-300 border-red-500/30',
@@ -226,6 +219,7 @@ export default function Reports() {
               <div className="space-y-4">
                 {analytics.severityCounts.map(({ severity, count }) => {
                   const percentage = analytics.incidents.length ? (count / analytics.incidents.length) * 100 : 0;
+                  const barClass = severityClass[severity].split(' ')[0].replace('/20', '');
                   return (
                     <div key={severity}>
                       <div className="flex justify-between items-center mb-1">
@@ -233,7 +227,7 @@ export default function Reports() {
                         <span className="text-xs font-mono text-muted-foreground">{count}</span>
                       </div>
                       <div className="h-2 rounded-full bg-muted/30 overflow-hidden">
-                        <div className={`h-full rounded-full ${severityClass[severity].split(' ')[0]}`} style={{ width: `${percentage}%` }} />
+                        <div className={`h-full rounded-full ${barClass}`} style={{ width: `${percentage}%` }} />
                       </div>
                     </div>
                   );
@@ -245,9 +239,9 @@ export default function Reports() {
               <h2 className="text-lg font-mono font-bold text-accent mb-1">INCIDENT STATE</h2>
               <p className="text-xs text-muted-foreground mb-6">Current workflow distribution</p>
               <div className="space-y-5">
-                <StateRow label="Open" value={analytics.open} total={analytics.incidents.length} className="text-red-300" />
-                <StateRow label="Investigating" value={analytics.investigating} total={analytics.incidents.length} className="text-yellow-300" />
-                <StateRow label="Resolved" value={analytics.resolved} total={analytics.incidents.length} className="text-green-300" />
+                <StateRow label="Open" value={analytics.open} total={analytics.incidents.length} barClass="bg-red-400" />
+                <StateRow label="Investigating" value={analytics.investigating} total={analytics.incidents.length} barClass="bg-yellow-400" />
+                <StateRow label="Resolved" value={analytics.resolved} total={analytics.incidents.length} barClass="bg-green-400" />
               </div>
             </Card>
           </div>
@@ -353,7 +347,7 @@ export default function Reports() {
   );
 }
 
-function MetricCard({ label, value, icon }: { label: string; value: string | number; icon: React.ReactNode }) {
+function MetricCard({ label, value, icon }: { label: string; value: string | number; icon: ReactNode }) {
   return (
     <Card className="glass glow-border p-5">
       <div className="flex items-center justify-between mb-3">
@@ -365,16 +359,16 @@ function MetricCard({ label, value, icon }: { label: string; value: string | num
   );
 }
 
-function StateRow({ label, value, total, className }: { label: string; value: number; total: number; className: string }) {
+function StateRow({ label, value, total, barClass }: { label: string; value: number; total: number; barClass: string }) {
   const percentage = total ? Math.round((value / total) * 100) : 0;
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <span className={`text-sm font-mono ${className}`}>{label}</span>
+        <span className="text-sm font-mono">{label}</span>
         <span className="text-xs font-mono text-muted-foreground">{value} · {percentage}%</span>
       </div>
       <div className="h-2 rounded-full bg-muted/30 overflow-hidden">
-        <div className="h-full rounded-full bg-current opacity-70" style={{ width: `${percentage}%` }} />
+        <div className={`h-full rounded-full ${barClass}`} style={{ width: `${percentage}%` }} />
       </div>
     </div>
   );
