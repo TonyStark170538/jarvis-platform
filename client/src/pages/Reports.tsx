@@ -1,198 +1,385 @@
-import { useState } from 'react';
-import { Download, Calendar, BarChart3 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  BarChart3,
+  Calendar,
+  CheckCircle2,
+  Download,
+  FileText,
+  RefreshCw,
+  ShieldAlert,
+  TrendingUp,
+} from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { securityStore } from '@/security/securityStore';
+import type { SecuritySeverity, SecurityStoreSnapshot } from '@/security/types';
 
-/**
- * J.A.R.V.I.S. Reports
- * Security reports and analytics
- * Design: Dark holographic interface with data visualization
- */
+type Period = 7 | 30 | 90;
 
-interface Report {
-  id: number;
-  title: string;
-  type: 'daily' | 'weekly' | 'monthly';
-  date: string;
-  incidents: number;
-  alerts: number;
-  status: 'completed' | 'pending';
+const severityRank: Record<SecuritySeverity, number> = {
+  info: 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+  critical: 4,
+};
+
+const severityClass: Record<SecuritySeverity, string> = {
+  critical: 'bg-red-500/20 text-red-300 border-red-500/30',
+  high: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+  medium: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
+  low: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  info: 'bg-gray-500/20 text-gray-300 border-gray-500/30',
+};
+
+function formatDate(value: string): string {
+  return new Date(value).toLocaleString();
+}
+
+function downloadText(filename: string, content: string, type = 'text/plain'): void {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(value: string | number): string {
+  return `"${String(value).replaceAll('"', '""')}"`;
 }
 
 export default function Reports() {
-  const [reports] = useState<Report[]>([
-    { id: 1, title: 'Daily Security Report - July 4, 2026', type: 'daily', date: 'Today', incidents: 3, alerts: 12, status: 'completed' },
-    { id: 2, title: 'Daily Security Report - July 3, 2026', type: 'daily', date: 'Yesterday', incidents: 2, alerts: 8, status: 'completed' },
-    { id: 3, title: 'Weekly Security Report - Week 27', type: 'weekly', date: 'Last Week', incidents: 15, alerts: 67, status: 'completed' },
-    { id: 4, title: 'Monthly Security Report - June 2026', type: 'monthly', date: 'Last Month', incidents: 42, alerts: 234, status: 'completed' },
-  ]);
+  const [snapshot, setSnapshot] = useState<SecurityStoreSnapshot>(securityStore.getSnapshot());
+  const [period, setPeriod] = useState<Period>(30);
 
-  const getTypeColor = (type: string) => {
-    switch (type) {
-      case 'daily': return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
-      case 'weekly': return 'bg-purple-500/20 text-purple-300 border-purple-500/30';
-      case 'monthly': return 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30';
-      default: return 'bg-gray-500/20 text-gray-300 border-gray-500/30';
+  useEffect(() => {
+    securityStore.startBackendPolling();
+    return () => securityStore.stopBackendPolling();
+  }, []);
+
+  useEffect(() => securityStore.subscribe(setSnapshot), []);
+
+  const analytics = useMemo(() => {
+    const cutoff = Date.now() - period * 24 * 60 * 60 * 1000;
+    const events = snapshot.events.filter((event) => new Date(event.timestamp).getTime() >= cutoff);
+    const detections = snapshot.detections.filter((detection) => new Date(detection.timestamp).getTime() >= cutoff);
+    const incidents = snapshot.incidents.filter((incident) => new Date(incident.updatedAt).getTime() >= cutoff);
+
+    const critical = incidents.filter((incident) => incident.severity === 'critical').length;
+    const resolved = incidents.filter((incident) => incident.status === 'resolved').length;
+    const open = incidents.filter((incident) => incident.status === 'open').length;
+    const investigating = incidents.filter((incident) => incident.status === 'investigating').length;
+
+    const severityCounts = (['critical', 'high', 'medium', 'low', 'info'] as SecuritySeverity[]).map((severity) => ({
+      severity,
+      count: incidents.filter((incident) => incident.severity === severity).length,
+    }));
+
+    const techniqueCounts = new Map<string, number>();
+    for (const detection of detections) {
+      for (const technique of detection.mitreTechniques) {
+        techniqueCounts.set(technique, (techniqueCounts.get(technique) ?? 0) + 1);
+      }
     }
+
+    const topTechniques = [...techniqueCounts.entries()]
+      .map(([technique, count]) => ({ technique, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+
+    const averageConfidence = detections.length
+      ? Math.round((detections.reduce((sum, detection) => sum + detection.confidence, 0) / detections.length) * 100)
+      : 0;
+
+    const averageResolutionHours = incidents
+      .filter((incident) => incident.status === 'resolved' && incident.resolvedAt)
+      .map((incident) => (new Date(incident.resolvedAt!).getTime() - new Date(incident.createdAt).getTime()) / 3_600_000)
+      .filter((hours) => Number.isFinite(hours) && hours >= 0);
+
+    const mttr = averageResolutionHours.length
+      ? averageResolutionHours.reduce((sum, hours) => sum + hours, 0) / averageResolutionHours.length
+      : null;
+
+    return {
+      events,
+      detections,
+      incidents,
+      critical,
+      resolved,
+      open,
+      investigating,
+      severityCounts,
+      topTechniques,
+      averageConfidence,
+      mttr,
+    };
+  }, [snapshot, period]);
+
+  const exportCsv = () => {
+    const rows = [
+      ['Incident ID', 'Title', 'Severity', 'Status', 'Assignee', 'Created', 'Updated', 'Evidence'],
+      ...analytics.incidents.map((incident) => [
+        incident.id,
+        incident.title,
+        incident.severity,
+        incident.status,
+        incident.assignee ?? 'Unassigned',
+        incident.createdAt,
+        incident.updatedAt,
+        incident.eventIds.length,
+      ]),
+    ];
+
+    const csv = rows.map((row) => row.map(csvCell).join(',')).join('\n');
+    downloadText(`jarvis-security-report-${period}d.csv`, csv, 'text/csv;charset=utf-8');
+  };
+
+  const generateReport = () => {
+    const generatedAt = new Date().toISOString();
+    const lines = [
+      'J.A.R.V.I.S. SECURITY REPORT',
+      `Generated: ${generatedAt}`,
+      `Reporting period: ${period} days`,
+      '',
+      `Incidents: ${analytics.incidents.length}`,
+      `Critical incidents: ${analytics.critical}`,
+      `Open: ${analytics.open}`,
+      `Investigating: ${analytics.investigating}`,
+      `Resolved: ${analytics.resolved}`,
+      `Security events: ${analytics.events.length}`,
+      `Detections: ${analytics.detections.length}`,
+      `Average detection confidence: ${analytics.averageConfidence}%`,
+      `Average MTTR: ${analytics.mttr === null ? 'N/A' : `${analytics.mttr.toFixed(1)}h`}`,
+      '',
+      'TOP MITRE ATT&CK TECHNIQUES',
+      ...analytics.topTechniques.map((item) => `${item.technique}: ${item.count} detections`),
+    ];
+
+    downloadText(`jarvis-security-report-${period}d.txt`, lines.join('\n'));
   };
 
   return (
     <div className="flex h-screen bg-background text-foreground">
       <Sidebar />
-      
       <main className="flex-1 overflow-auto">
-        {/* Header */}
         <div className="glass border-b sticky top-0 z-40">
           <div className="max-w-7xl mx-auto px-6 py-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
-                <h1 className="text-3xl font-bold font-mono">REPORTS</h1>
-                <p className="text-sm text-muted-foreground">Security analytics and insights</p>
+                <div className="flex items-center gap-3">
+                  <h1 className="text-3xl font-bold font-mono">REPORTS</h1>
+                  <Badge className="bg-cyan-500/10 text-cyan-300 border-cyan-500/30 border">
+                    {snapshot.backendOnline ? 'LIVE DATA' : 'OFFLINE'}
+                  </Badge>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Security analytics calculated from persisted J.A.R.V.I.S. telemetry
+                </p>
               </div>
-              <Button className="bg-accent hover:bg-accent/90 text-background font-mono gap-2">
-                <BarChart3 className="w-4 h-4" />
-                Generate Report
-              </Button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex rounded-md border border-border/40 overflow-hidden">
+                  {[7, 30, 90].map((value) => (
+                    <Button
+                      key={value}
+                      size="sm"
+                      variant={period === value ? 'default' : 'ghost'}
+                      className="rounded-none font-mono"
+                      onClick={() => setPeriod(value as Period)}
+                    >
+                      {value}D
+                    </Button>
+                  ))}
+                </div>
+                <Button variant="outline" size="sm" onClick={() => void securityStore.hydrateFromBackend()}>
+                  <RefreshCw className="w-4 h-4" />
+                </Button>
+                <Button size="sm" onClick={generateReport} className="gap-2">
+                  <BarChart3 className="w-4 h-4" />
+                  Generate Report
+                </Button>
+              </div>
             </div>
           </div>
         </div>
 
         <div className="max-w-7xl mx-auto px-6 py-8">
-          {/* Key Metrics */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-            <MetricCard label="Total Incidents (30d)" value="42" trend="↓ 12%" />
-            <MetricCard label="Average MTTR" value="4.2h" trend="↓ 8%" />
-            <MetricCard label="Detection Rate" value="94%" trend="↑ 3%" />
-            <MetricCard label="False Positives" value="2.1%" trend="↓ 0.5%" />
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
+            <MetricCard label={`Incidents (${period}d)`} value={analytics.incidents.length} icon={<ShieldAlert className="w-4 h-4" />} />
+            <MetricCard label="Detection Confidence" value={`${analytics.averageConfidence}%`} icon={<TrendingUp className="w-4 h-4" />} />
+            <MetricCard label="Resolved" value={analytics.resolved} icon={<CheckCircle2 className="w-4 h-4" />} />
+            <MetricCard label="Average MTTR" value={analytics.mttr === null ? 'N/A' : `${analytics.mttr.toFixed(1)}h`} icon={<Calendar className="w-4 h-4" />} />
           </div>
 
-          {/* Report List */}
-          <div className="mb-8">
-            <h2 className="text-lg font-mono font-bold mb-4 text-accent">RECENT REPORTS</h2>
-            <div className="space-y-4">
-              {reports.map((report) => (
-                <Card key={report.id} className="glass glow-border p-6 hover:shadow-lg transition-all">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="font-mono font-bold text-lg">{report.title}</h3>
-                        <Badge className={`${getTypeColor(report.type)} border capitalize`}>
-                          {report.type}
-                        </Badge>
-                      </div>
-                      <p className="text-sm text-muted-foreground mb-4">{report.date}</p>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div>
-                          <p className="text-xs text-muted-foreground">Incidents</p>
-                          <p className="text-lg font-mono font-bold text-cyan-400">{report.incidents}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground">Alerts</p>
-                          <p className="text-lg font-mono font-bold text-blue-400">{report.alerts}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground">Critical</p>
-                          <p className="text-lg font-mono font-bold text-red-400">{Math.floor(report.incidents * 0.3)}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground">Resolved</p>
-                          <p className="text-lg font-mono font-bold text-green-400">{Math.floor(report.incidents * 0.85)}</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex gap-2 ml-4">
-                      <Button size="sm" variant="outline" className="text-xs gap-2">
-                        <Download className="w-3 h-3" />
-                        PDF
-                      </Button>
-                      <Button size="sm" variant="outline" className="text-xs gap-2">
-                        <Download className="w-3 h-3" />
-                        CSV
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          </div>
-
-          {/* Report Scheduling */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <Card className="glass glow-border p-6">
-              <h2 className="text-lg font-mono font-bold mb-4 text-accent">SCHEDULED REPORTS</h2>
-              <div className="space-y-3">
-                <div className="p-3 bg-card/30 rounded border border-border/20">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-mono text-sm font-bold">Daily Report</p>
-                      <p className="text-xs text-muted-foreground">Every day at 08:00 UTC</p>
-                    </div>
-                    <Badge className="bg-green-500/20 text-green-300 border-green-500/30 border">Active</Badge>
-                  </div>
-                </div>
-                <div className="p-3 bg-card/30 rounded border border-border/20">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-mono text-sm font-bold">Weekly Report</p>
-                      <p className="text-xs text-muted-foreground">Every Monday at 09:00 UTC</p>
-                    </div>
-                    <Badge className="bg-green-500/20 text-green-300 border-green-500/30 border">Active</Badge>
-                  </div>
-                </div>
-                <div className="p-3 bg-card/30 rounded border border-border/20">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-mono text-sm font-bold">Monthly Report</p>
-                      <p className="text-xs text-muted-foreground">1st of each month at 10:00 UTC</p>
-                    </div>
-                    <Badge className="bg-green-500/20 text-green-300 border-green-500/30 border">Active</Badge>
-                  </div>
-                </div>
-              </div>
-            </Card>
-
-            <Card className="glass glow-border p-6">
-              <h2 className="text-lg font-mono font-bold mb-4 text-accent">REPORT STATISTICS</h2>
-              <div className="space-y-4">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
+            <Card className="glass glow-border p-6 xl:col-span-2">
+              <div className="flex items-center justify-between mb-6">
                 <div>
-                  <p className="text-sm text-muted-foreground mb-2">Total Reports Generated</p>
-                  <p className="text-3xl font-mono font-bold text-cyan-400">127</p>
+                  <h2 className="text-lg font-mono font-bold text-accent">SEVERITY DISTRIBUTION</h2>
+                  <p className="text-xs text-muted-foreground mt-1">Persisted incidents in the selected period</p>
                 </div>
-                <div className="pt-4 border-t border-border/20">
-                  <p className="text-sm text-muted-foreground mb-2">Average Report Size</p>
-                  <p className="text-3xl font-mono font-bold text-blue-400">2.4 MB</p>
-                </div>
-                <div className="pt-4 border-t border-border/20">
-                  <p className="text-sm text-muted-foreground mb-2">Storage Used</p>
-                  <p className="text-3xl font-mono font-bold text-green-400">305 MB</p>
-                </div>
+                <span className="text-xs font-mono text-muted-foreground">{analytics.incidents.length} total</span>
+              </div>
+              <div className="space-y-4">
+                {analytics.severityCounts.map(({ severity, count }) => {
+                  const percentage = analytics.incidents.length ? (count / analytics.incidents.length) * 100 : 0;
+                  return (
+                    <div key={severity}>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-xs font-mono uppercase">{severity}</span>
+                        <span className="text-xs font-mono text-muted-foreground">{count}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-muted/30 overflow-hidden">
+                        <div className={`h-full rounded-full ${severityClass[severity].split(' ')[0]}`} style={{ width: `${percentage}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+
+            <Card className="glass glow-border p-6">
+              <h2 className="text-lg font-mono font-bold text-accent mb-1">INCIDENT STATE</h2>
+              <p className="text-xs text-muted-foreground mb-6">Current workflow distribution</p>
+              <div className="space-y-5">
+                <StateRow label="Open" value={analytics.open} total={analytics.incidents.length} className="text-red-300" />
+                <StateRow label="Investigating" value={analytics.investigating} total={analytics.incidents.length} className="text-yellow-300" />
+                <StateRow label="Resolved" value={analytics.resolved} total={analytics.incidents.length} className="text-green-300" />
               </div>
             </Card>
           </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <Card className="glass glow-border p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-lg font-mono font-bold text-accent">MITRE ATT&CK COVERAGE</h2>
+                  <p className="text-xs text-muted-foreground mt-1">Most frequently triggered techniques</p>
+                </div>
+                <FileText className="w-5 h-5 text-muted-foreground" />
+              </div>
+              {analytics.topTechniques.length ? (
+                <div className="space-y-3">
+                  {analytics.topTechniques.map((item, index) => (
+                    <div key={item.technique} className="flex items-center gap-3">
+                      <span className="w-6 text-xs font-mono text-muted-foreground">0{index + 1}</span>
+                      <span className="font-mono text-sm flex-1">{item.technique}</span>
+                      <Badge variant="outline" className="font-mono">{item.count}</Badge>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState text="No MITRE detections in this period." />
+              )}
+            </Card>
+
+            <Card className="glass glow-border p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-lg font-mono font-bold text-accent">REPORT EXPORTS</h2>
+                  <p className="text-xs text-muted-foreground mt-1">Export the current reporting window</p>
+                </div>
+                <Download className="w-5 h-5 text-muted-foreground" />
+              </div>
+              <div className="space-y-3">
+                <Button variant="outline" className="w-full justify-between" onClick={generateReport}>
+                  <span className="flex items-center gap-2"><FileText className="w-4 h-4" /> Executive text report</span>
+                  <span className="text-xs text-muted-foreground">TXT</span>
+                </Button>
+                <Button variant="outline" className="w-full justify-between" onClick={exportCsv}>
+                  <span className="flex items-center gap-2"><Download className="w-4 h-4" /> Incident dataset</span>
+                  <span className="text-xs text-muted-foreground">CSV</span>
+                </Button>
+              </div>
+              <div className="mt-6 pt-4 border-t border-border/20 text-xs text-muted-foreground font-mono">
+                Generated from {analytics.events.length} events, {analytics.detections.length} detections and {analytics.incidents.length} incidents.
+              </div>
+            </Card>
+          </div>
+
+          <Card className="glass glow-border p-6">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-lg font-mono font-bold text-accent">RECENT INCIDENT ACTIVITY</h2>
+                <p className="text-xs text-muted-foreground mt-1">Latest persisted incidents available for investigation</p>
+              </div>
+              <span className="text-xs font-mono text-muted-foreground">{analytics.incidents.length} in window</span>
+            </div>
+            {analytics.incidents.length ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-border/20 text-xs text-muted-foreground font-mono">
+                      <th className="py-3 pr-4">INCIDENT</th>
+                      <th className="py-3 pr-4">SEVERITY</th>
+                      <th className="py-3 pr-4">STATUS</th>
+                      <th className="py-3 pr-4">EVIDENCE</th>
+                      <th className="py-3">UPDATED</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...analytics.incidents]
+                      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+                      .slice(0, 10)
+                      .map((incident) => (
+                        <tr key={incident.id} className="border-b border-border/10 last:border-0">
+                          <td className="py-3 pr-4">
+                            <p className="font-mono text-sm font-bold">{incident.title}</p>
+                            <p className="font-mono text-[10px] text-muted-foreground">{incident.id}</p>
+                          </td>
+                          <td className="py-3 pr-4">
+                            <Badge className={`${severityClass[incident.severity]} border`}>{incident.severity.toUpperCase()}</Badge>
+                          </td>
+                          <td className="py-3 pr-4">
+                            <span className="text-xs font-mono uppercase">{incident.status}</span>
+                          </td>
+                          <td className="py-3 pr-4 text-sm font-mono">{incident.eventIds.length}</td>
+                          <td className="py-3 text-xs font-mono text-muted-foreground">{formatDate(incident.updatedAt)}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <EmptyState text="No persisted incidents in the selected period. Run a safe Attack Lab scenario to populate analytics." />
+            )}
+          </Card>
         </div>
       </main>
     </div>
   );
 }
 
-interface MetricCardProps {
-  label: string;
-  value: string;
-  trend: string;
-}
-
-function MetricCard({ label, value, trend }: MetricCardProps) {
-  const isPositive = trend.startsWith('↓');
-
+function MetricCard({ label, value, icon }: { label: string; value: string | number; icon: React.ReactNode }) {
   return (
-    <Card className="glass border border-border/20 p-4">
-      <p className="text-xs text-muted-foreground font-mono uppercase">{label}</p>
-      <div className="flex items-end justify-between mt-2">
-        <p className="text-2xl font-mono font-bold text-cyan-400">{value}</p>
-        <p className={`text-xs font-mono ${isPositive ? 'text-green-400' : 'text-yellow-400'}`}>{trend}</p>
+    <Card className="glass glow-border p-5">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs text-muted-foreground font-mono uppercase">{label}</p>
+        <span className="text-cyan-400">{icon}</span>
       </div>
+      <p className="text-3xl font-mono font-bold text-cyan-400">{value}</p>
     </Card>
   );
+}
+
+function StateRow({ label, value, total, className }: { label: string; value: number; total: number; className: string }) {
+  const percentage = total ? Math.round((value / total) * 100) : 0;
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className={`text-sm font-mono ${className}`}>{label}</span>
+        <span className="text-xs font-mono text-muted-foreground">{value} · {percentage}%</span>
+      </div>
+      <div className="h-2 rounded-full bg-muted/30 overflow-hidden">
+        <div className="h-full rounded-full bg-current opacity-70" style={{ width: `${percentage}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return <div className="py-10 text-center text-sm text-muted-foreground font-mono">{text}</div>;
 }
