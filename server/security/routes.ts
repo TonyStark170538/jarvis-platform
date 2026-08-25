@@ -2,7 +2,21 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import { evaluateEvent } from './detectionEngine';
-import { addDetection, addEvent, addIncident, addIncidentActivity, getDevices, getDetections, getEvents, getIncidentDetail, getIncidents, getSnapshot } from './store';
+import {
+  addDetection,
+  addEvent,
+  addIncident,
+  addIncidentActivity,
+  addIncidentNote,
+  getDevices,
+  getDetections,
+  getEvents,
+  getIncidentById,
+  getIncidentDetail,
+  getIncidents,
+  getSnapshot,
+} from './store';
+import { requireDb } from './db';
 import type { SecurityEvent, SecurityIncident, SecuritySeverity } from './types';
 
 const router = Router();
@@ -20,6 +34,7 @@ const severityRank: Record<SecuritySeverity, number> = { info: 0, low: 1, medium
 function highestSeverity(values: SecuritySeverity[]): SecuritySeverity { return values.reduce<SecuritySeverity>((highest, value) => severityRank[value] > severityRank[highest] ? value : highest, 'info'); }
 function correlationKeys(event: SecurityEvent): string[] { return [event.sourceIP ? `ip:${event.sourceIP}` : null, event.hostname ? `host:${event.hostname}` : null, event.username ? `user:${event.username}` : null, event.scenarioId ? `scenario:${event.scenarioId}` : null].filter((value): value is string => Boolean(value)); }
 function shareCorrelationKey(a: SecurityEvent, b: SecurityEvent): boolean { const keys = new Set(correlationKeys(a)); return correlationKeys(b).some((key) => keys.has(key)); }
+function actorFromRequest(req: { header(name: string): string | undefined }): string { return req.header('X-JARVIS-Actor')?.trim() || 'SOC Analyst'; }
 
 async function createIncidentFromDetection(event: SecurityEvent, detection: Awaited<ReturnType<typeof evaluateEvent>>[number]) {
   const recentEvents = (await getEvents(1000)).filter((candidate) => Math.abs(new Date(event.timestamp).getTime() - new Date(candidate.timestamp).getTime()) <= 10 * 60 * 1000 && shareCorrelationKey(event, candidate));
@@ -59,5 +74,70 @@ router.post('/events', async (req, res, next) => {
 router.get('/detections', async (req, res, next) => { try { const rawLimit = Number(req.query.limit ?? 100); const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 500)) : 100; res.json({ success: true, data: await getDetections(limit) }); } catch (error) { next(error); } });
 router.get('/incidents', async (_req, res, next) => { try { res.json({ success: true, data: await getIncidents() }); } catch (error) { next(error); } });
 router.get('/incidents/:id', async (req, res, next) => { try { const detail = await getIncidentDetail(req.params.id); if (!detail) return res.status(404).json({ success: false, error: 'Incident not found' }); return res.json({ success: true, data: detail }); } catch (error) { next(error); } });
+
+router.patch('/incidents/:id/status', async (req, res, next) => {
+  try {
+    const parsed = z.object({ status: z.enum(['open', 'investigating', 'resolved']) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: 'Invalid incident status' });
+    const incident = await getIncidentById(req.params.id);
+    if (!incident) return res.status(404).json({ success: false, error: 'Incident not found' });
+    if (incident.status === parsed.data.status) return res.json({ success: true, data: incident });
+    const actor = actorFromRequest(req);
+    const db = requireDb();
+    const resolvedAt = parsed.data.status === 'resolved' ? new Date().toISOString() : null;
+    await db.query(`UPDATE security_incidents SET status = $1, resolved_at = $2, updated_at = NOW() WHERE id = $3`, [parsed.data.status, resolvedAt, req.params.id]);
+    const updated = await getIncidentById(req.params.id);
+    if (!updated) return res.status(404).json({ success: false, error: 'Incident not found after update' });
+    await addIncidentActivity(updated.id, `status_changed:${parsed.data.status}`, actor, { previousStatus: incident.status, status: parsed.data.status });
+    return res.json({ success: true, data: updated });
+  } catch (error) { next(error); }
+});
+
+router.patch('/incidents/:id/assignee', async (req, res, next) => {
+  try {
+    const parsed = z.object({ assignee: z.string().trim().min(1).max(200) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: 'Assignee is required' });
+    const incident = await getIncidentById(req.params.id);
+    if (!incident) return res.status(404).json({ success: false, error: 'Incident not found' });
+    if (incident.assignee === parsed.data.assignee) return res.json({ success: true, data: incident });
+    const actor = actorFromRequest(req);
+    const db = requireDb();
+    await db.query(`UPDATE security_incidents SET assignee = $1, updated_at = NOW() WHERE id = $2`, [parsed.data.assignee, req.params.id]);
+    const updated = await getIncidentById(req.params.id);
+    if (!updated) return res.status(404).json({ success: false, error: 'Incident not found after update' });
+    await addIncidentActivity(updated.id, 'assignee_changed', actor, { previousAssignee: incident.assignee ?? null, assignee: updated.assignee });
+    return res.json({ success: true, data: updated });
+  } catch (error) { next(error); }
+});
+
+router.post('/incidents/:id/notes', async (req, res, next) => {
+  try {
+    const parsed = z.object({ body: z.string().trim().min(1).max(10000) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: 'Note body is required' });
+    const incident = await getIncidentById(req.params.id);
+    if (!incident) return res.status(404).json({ success: false, error: 'Incident not found' });
+    const actor = actorFromRequest(req);
+    const note = await addIncidentNote(incident.id, actor, parsed.data.body);
+    await addIncidentActivity(incident.id, 'note_added', actor, { noteId: note.id });
+    return res.status(201).json({ success: true, data: note });
+  } catch (error) { next(error); }
+});
+
+router.get('/incidents/:id/notes', async (req, res, next) => {
+  try {
+    const detail = await getIncidentDetail(req.params.id);
+    if (!detail) return res.status(404).json({ success: false, error: 'Incident not found' });
+    return res.json({ success: true, data: detail.notes });
+  } catch (error) { next(error); }
+});
+
+router.get('/incidents/:id/activity', async (req, res, next) => {
+  try {
+    const detail = await getIncidentDetail(req.params.id);
+    if (!detail) return res.status(404).json({ success: false, error: 'Incident not found' });
+    return res.json({ success: true, data: detail.activity });
+  } catch (error) { next(error); }
+});
+
 router.get('/devices', async (_req, res, next) => { try { res.json({ success: true, data: await getDevices() }); } catch (error) { next(error); } });
 export default router;
