@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import { evaluateEvent } from './detectionEngine';
-import { addDetection, addEvent, addIncident, addIncidentActivity, addIncidentNote, addIoc, deleteIoc, getDevices, getDetections, getEvents, getIncidentById, getIncidentDetail, getIncidents, getIocs, getSnapshot } from './store';
+import { addDetection, addEvent, addIncident, addIncidentActivity, addIncidentNote, addIoc, deleteIoc, getDevices, getDetections, getEvents, getIncidentById, getIncidentDetail, getIncidents, getIocContext, getIocs, getSnapshot } from './store';
 import { requireDb } from './db';
 import type { SecurityEvent, SecurityIncident, SecuritySeverity } from './types';
 const router=Router();
@@ -25,9 +25,9 @@ router.patch('/incidents/:id/assignee',async(req,res,next)=>{try{const parsed=z.
 router.post('/incidents/:id/notes',async(req,res,next)=>{try{const parsed=z.object({body:z.string().trim().min(1).max(10000)}).safeParse(req.body);if(!parsed.success)return res.status(400).json({success:false,error:'Note body is required'});const incident=await getIncidentById(req.params.id);if(!incident)return res.status(404).json({success:false,error:'Incident not found'});const actor=actorFromRequest(req),note=await addIncidentNote(incident.id,actor,parsed.data.body);await addIncidentActivity(incident.id,'note_added',actor,{noteId:note.id});res.status(201).json({success:true,data:note});}catch(e){next(e);}});
 router.get('/incidents/:id/notes',async(req,res,next)=>{try{const d=await getIncidentDetail(req.params.id);if(!d)return res.status(404).json({success:false,error:'Incident not found'});res.json({success:true,data:d.notes});}catch(e){next(e);}});
 router.get('/incidents/:id/activity',async(req,res,next)=>{try{const d=await getIncidentDetail(req.params.id);if(!d)return res.status(404).json({success:false,error:'Incident not found'});res.json({success:true,data:d.activity});}catch(e){next(e);}});
-
 const iocSchema=z.object({type:z.enum(['ip','domain','hash','url']),value:z.string().trim().min(2).max(2048),severity:z.enum(['critical','high','medium','low','info']),tags:z.array(z.string().trim().min(1).max(50)).max(20).optional(),confidence:z.number().int().min(0).max(100).optional()});
 router.get('/iocs',async(_req,res,next)=>{try{res.json({success:true,data:await getIocs()});}catch(e){next(e);}});
+router.get('/iocs/:id/context',async(req,res,next)=>{try{const context=await getIocContext(req.params.id);if(!context)return res.status(404).json({success:false,error:'IOC not found'});res.json({success:true,data:context});}catch(e){next(e);}});
 router.post('/iocs',async(req,res,next)=>{try{const parsed=iocSchema.safeParse(req.body);if(!parsed.success)return res.status(400).json({success:false,error:'Invalid IOC payload',details:parsed.error.flatten()});const actor=actorFromRequest(req);const value=parsed.data.value.toLowerCase();const ioc=await addIoc({id:`ioc-${nanoid(12)}`,...parsed.data,value,source:actor});res.status(201).json({success:true,data:ioc});}catch(e){next(e);}});
 router.delete('/iocs/:id',async(req,res,next)=>{try{const ioc=await deleteIoc(req.params.id);if(!ioc)return res.status(404).json({success:false,error:'IOC not found'});res.json({success:true,data:ioc});}catch(e){next(e);}});
 router.get('/devices',async(_req,res,next)=>{try{res.json({success:true,data:await getDevices()});}catch(e){next(e);}});
