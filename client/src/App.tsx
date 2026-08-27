@@ -13,6 +13,7 @@ import Assets from "./pages/Assets";
 import Reports from "./pages/Reports";
 import Intelligence from "./pages/Intelligence";
 import IocInvestigation from "./pages/IocInvestigation";
+import DetectionCenter from "./pages/DetectionCenter";
 import Settings from "./pages/Settings";
 import { securityStore } from "./security/securityStore";
 
@@ -27,6 +28,7 @@ function Router() {
       <Route path={"/reports"} component={Reports} />
       <Route path={"/intelligence"} component={Intelligence} />
       <Route path={"/intelligence/ioc/:id"} component={IocInvestigation} />
+      <Route path={"/detections"} component={DetectionCenter} />
       <Route path={"/settings"} component={Settings} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
