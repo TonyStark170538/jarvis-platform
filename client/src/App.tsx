@@ -1,60 +1,14 @@
-import { useEffect } from "react";
-import { Toaster } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
-import ErrorBoundary from "./components/ErrorBoundary";
-import { ThemeProvider } from "./contexts/ThemeContext";
-import Dashboard from "./pages/Dashboard";
-import AttackLab from "./pages/AttackLab";
-import Monitoring from "./pages/Monitoring";
-import Incidents from "./pages/Incidents";
-import Assets from "./pages/Assets";
-import Reports from "./pages/Reports";
-import Intelligence from "./pages/Intelligence";
-import IocInvestigation from "./pages/IocInvestigation";
-import DetectionCenter from "./pages/DetectionCenter";
-import Settings from "./pages/Settings";
-import { securityStore } from "./security/securityStore";
-
-function Router() {
-  return (
-    <Switch>
-      <Route path={"/"} component={Dashboard} />
-      <Route path={"/attack-lab"} component={AttackLab} />
-      <Route path={"/monitoring"} component={Monitoring} />
-      <Route path={"/incidents"} component={Incidents} />
-      <Route path={"/assets"} component={Assets} />
-      <Route path={"/reports"} component={Reports} />
-      <Route path={"/intelligence"} component={Intelligence} />
-      <Route path={"/intelligence/ioc/:id"} component={IocInvestigation} />
-      <Route path={"/detections"} component={DetectionCenter} />
-      <Route path={"/settings"} component={Settings} />
-      <Route path={"/404"} component={NotFound} />
-      <Route component={NotFound} />
-    </Switch>
-  );
-}
-
-function App() {
-  useEffect(() => {
-    securityStore.startBackendPolling();
-
-    return () => {
-      securityStore.stopBackendPolling();
-    };
-  }, []);
-
-  return (
-    <ErrorBoundary>
-      <ThemeProvider defaultTheme="dark" switchable>
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
-      </ThemeProvider>
-    </ErrorBoundary>
-  );
-}
-
-export default App;
+import { useEffect } from 'react';
+import { Toaster } from '@/components/ui/sonner';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import NotFound from '@/pages/NotFound';
+import { Route, Switch, Redirect } from 'wouter';
+import ErrorBoundary from './components/ErrorBoundary';
+import { ThemeProvider } from './contexts/ThemeContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import Dashboard from './pages/Dashboard'; import AttackLab from './pages/AttackLab'; import Monitoring from './pages/Monitoring'; import Incidents from './pages/Incidents'; import Assets from './pages/Assets'; import Reports from './pages/Reports'; import Intelligence from './pages/Intelligence'; import IocInvestigation from './pages/IocInvestigation'; import DetectionCenter from './pages/DetectionCenter'; import ResponseCenter from './pages/ResponseCenter'; import Settings from './pages/Settings'; import Login from './pages/Login';
+import { securityStore } from './security/securityStore';
+function Router(){ return <Switch><Route path="/login" component={Login}/><Route path="/"><Protected><Dashboard/></Protected></Route><Route path="/attack-lab"><Protected><AttackLab/></Protected></Route><Route path="/monitoring"><Protected><Monitoring/></Protected></Route><Route path="/incidents"><Protected><Incidents/></Protected></Route><Route path="/assets"><Protected><Assets/></Protected></Route><Route path="/reports"><Protected><Reports/></Protected></Route><Route path="/intelligence/ioc/:id"><Protected><IocInvestigation/></Protected></Route><Route path="/intelligence"><Protected><Intelligence/></Protected></Route><Route path="/detections"><Protected><DetectionCenter/></Protected></Route><Route path="/response"><Protected><ResponseCenter/></Protected></Route><Route path="/settings"><Protected><Settings/></Protected></Route><Route path="/404" component={NotFound}/><Route component={NotFound}/></Switch>; }
+function Protected({children}:{children:React.ReactNode}){ const {user,loading}=useAuth(); if(loading)return <div className="min-h-screen bg-background flex items-center justify-center font-mono text-accent">AUTHENTICATING...</div>; return user?children:<Redirect to="/login"/>; }
+function App(){ useEffect(()=>{securityStore.startBackendPolling(); return()=>securityStore.stopBackendPolling();},[]); return <ErrorBoundary><ThemeProvider defaultTheme="dark" switchable><TooltipProvider><Toaster/><Router/></TooltipProvider></ThemeProvider></ErrorBoundary>; }
+export default function AppWithAuth(){ return <AuthProvider><App/></AuthProvider>; }
