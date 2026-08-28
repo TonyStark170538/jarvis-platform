@@ -1,0 +1,9 @@
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+
+const API = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+export interface AuthUser { id: string; email: string; name: string; role: string; }
+interface AuthContextValue { user: AuthUser | null; loading: boolean; signIn: (email: string, password: string) => Promise<void>; signUp: (name: string, email: string, password: string) => Promise<void>; signOut: () => Promise<void>; }
+const AuthContext = createContext<AuthContextValue | null>(null);
+async function call(path: string, body?: unknown) { const response = await fetch(`${API}/api/auth${path}`, { method: body ? 'POST' : 'GET', credentials: 'include', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined }); const payload = await response.json().catch(() => null); if (!response.ok) throw new Error(payload?.error ?? 'Authentication request failed'); return payload?.data; }
+export function AuthProvider({ children }: { children: ReactNode }) { const [user, setUser] = useState<AuthUser | null>(null); const [loading, setLoading] = useState(true); useEffect(() => { call('/me').then(setUser).catch(() => setUser(null)).finally(() => setLoading(false)); }, []); const signIn = async (email: string, password: string) => setUser(await call('/signin', { email, password })); const signUp = async (name: string, email: string, password: string) => setUser(await call('/signup', { name, email, password })); const signOut = async () => { await call('/logout', {}); setUser(null); }; return <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>{children}</AuthContext.Provider>; }
+export function useAuth() { const value = useContext(AuthContext); if (!value) throw new Error('useAuth must be used inside AuthProvider'); return value; }

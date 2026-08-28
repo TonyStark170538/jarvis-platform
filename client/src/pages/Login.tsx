@@ -1,0 +1,13 @@
+import { FormEvent, useState } from 'react';
+import { useLocation } from 'wouter';
+import { ShieldCheck, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card } from '@/components/ui/card';
+import { useAuth } from '@/contexts/AuthContext';
+
+export default function Login() {
+  const { signIn, signUp } = useAuth(); const [, navigate] = useLocation(); const [mode, setMode] = useState<'signin'|'signup'>('signin'); const [name,setName]=useState(''); const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false);
+  const submit = async (e: FormEvent) => { e.preventDefault(); setError(''); setBusy(true); try { if(mode==='signin') await signIn(email,password); else await signUp(name,email,password); navigate('/'); } catch(err) { setError(err instanceof Error ? err.message : 'Authentication failed'); } finally { setBusy(false); } };
+  return <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-6"><Card className="w-full max-w-md glass glow-border p-8"><div className="text-center mb-8"><div className="mx-auto mb-4 w-14 h-14 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center"><ShieldCheck className="w-7 h-7 text-white" /></div><h1 className="text-2xl font-mono font-bold">J.A.R.V.I.S.</h1><p className="text-sm text-muted-foreground mt-1">Security Operations Command Center</p></div><div className="flex gap-2 mb-6"><Button type="button" variant={mode==='signin'?'default':'outline'} className="flex-1 font-mono" onClick={()=>setMode('signin')}>SIGN IN</Button><Button type="button" variant={mode==='signup'?'default':'outline'} className="flex-1 font-mono" onClick={()=>setMode('signup')}>CREATE ACCOUNT</Button></div><form onSubmit={submit} className="space-y-4">{mode==='signup'&&<Input required minLength={2} value={name} onChange={e=>setName(e.target.value)} placeholder="Full name" autoComplete="name" />}<Input required type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email address" autoComplete="email" /><Input required minLength={8} type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Password (8+ characters)" autoComplete={mode==='signin'?'current-password':'new-password'} />{error&&<p className="text-sm text-destructive">{error}</p>}<Button disabled={busy} className="w-full font-mono bg-accent text-background hover:bg-accent/90">{busy&&<Loader2 className="w-4 h-4 mr-2 animate-spin" />}{mode==='signin'?'AUTHENTICATE':'REGISTER ANALYST'}</Button></form></Card></div>;
+}
